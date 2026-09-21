@@ -1,0 +1,12 @@
+# build output and caches
+build/
+app/build/
+.gradle/
+.kotlin/
+local.properties
+*.iml
+.idea/
+
+# release plumbing for one specific deployment: hostname, path id, the APK itself
+dist/
+ship.sh

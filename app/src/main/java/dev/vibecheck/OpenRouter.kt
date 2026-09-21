@@ -1,0 +1,151 @@
+package dev.vibecheck
+
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.BufferedReader
+import java.net.HttpURLConnection
+import java.net.URL
+
+/**
+ * On-demand deep reasoning through OpenRouter. Jev answers every turn; this runs only when you
+ * press a button, because it costs money and takes seconds rather than milliseconds.
+ *
+ * When the transcript came from OCR the screenshot is attached and a vision model is used, so
+ * the stickers and emoji that OCR cannot read are still part of the analysis.
+ */
+object OpenRouter {
+
+    private const val ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
+
+    class Failure(message: String) : Exception(message)
+
+    /** Blocking. Call from a background thread. imageJpegBase64 null means text-only. */
+    fun chat(apiKey: String, model: String, system: String, user: String, imageJpegBase64: String?): String {
+        val content = if (imageJpegBase64 == null) JSONObject().put("role", "user").put("content", user)
+        else JSONObject().put("role", "user").put(
+            "content", JSONArray()
+                .put(JSONObject().put("type", "text").put("text", user))
+                .put(
+                    JSONObject().put("type", "image_url").put(
+                        "image_url",
+                        JSONObject().put("url", "data:image/jpeg;base64,$imageJpegBase64")
+                    )
+                )
+        )
+
+        val body = JSONObject()
+            .put("model", model)
+            .put("temperature", 0.7)
+            .put("max_tokens", 2500)
+            // The output is three short lines. Left to itself the reasoning model spent 18s and
+            // its whole budget thinking (one run looped on a homophone), then had nothing to say.
+            .put("reasoning", JSONObject().put("effort", "low"))
+            .put(
+                "messages", JSONArray()
+                    .put(JSONObject().put("role", "system").put("content", system))
+                    .put(content)
+            ).toString()
+
+        val conn = (URL(ENDPOINT).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 10_000
+            readTimeout = 60_000
+            doOutput = true
+            setRequestProperty("Authorization", "Bearer $apiKey")
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("X-Title", "Vibecheck")
+        }
+        try {
+            conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            val code = conn.responseCode
+            val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
+                ?.bufferedReader()?.use(BufferedReader::readText) ?: ""
+            if (code !in 200..299) throw Failure("HTTP $code: ${text.take(160)}")
+            val root = JSONObject(text)
+            val choices = root.optJSONArray("choices")
+                ?: throw Failure(root.optJSONObject("error")?.optString("message") ?: "no choices: ${text.take(160)}")
+            val choice = choices.getJSONObject(0)
+            val msg = choice.getJSONObject("message")
+            // optString() on a JSON null returns the literal "null" on Android, which is how a
+            // truncated answer ended up printed on the card as the word null.
+            val content = if (msg.isNull("content")) "" else msg.optString("content").trim()
+            if (content.isNotEmpty()) return content
+            // Never fall back to the reasoning field: that is the model's private scratchpad, and
+            // showing it produced a card full of "但用户要求…" deliberation instead of replies.
+            throw Failure("模型没写完，再点一次")
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    // ---- prompts ----
+
+    const val DEEP_SYSTEM =
+        "你是一个懂中文聊天潜台词的分析者。只说有用的话，不寒暄，不复述原文，不写免责声明。" +
+            "输出三行，每行以「•」开头：第一行说对方真正在意什么，第二行说这一步最容易踩的坑，" +
+            "第三行给一个具体到可以照做的下一步。每行不超过 40 个字。"
+
+    const val REPLY_SYSTEM =
+        "你替用户起草中文回复。必须贴着用户平时的说话方式：长度、语气、标点、是否用表情都要像他本人。" +
+            "给三条不同策略的候选：第一条先接住情绪，第二条给具体方案，第三条轻松化解。" +
+            "每条单独一行，用「1. 」「2. 」「3. 」开头，每条不超过 30 个字，不要解释。"
+
+    const val BIO_SYSTEM =
+        "你在读一段完整的聊天记录，写一份关于「对方」的档案给「我」以后用。只写记录里能看出来的，不编。" +
+            "四到六行，每行以「•」开头，各不超过 40 字：Ta 是我的什么人（关系与亲疏）；我们常聊什么；" +
+            "Ta 的说话风格（长短、语气、口头禅、用不用表情）；我对 Ta 的说话风格；" +
+            "反复出现的事或雷区；Ta 在乎什么。"
+
+    /** A history read, oldest first, trimmed to what the model needs. */
+    fun bioPrompt(peer: String, history: List<Pair<String, String>>, maxChars: Int = 6000): String {
+        val sb = StringBuilder("对方：").append(peer).append("\n共 ").append(history.size).append(" 条，从旧到新：\n")
+        // Keep the newest part when it does not all fit: recent history says more about now.
+        // One line per message, so a pasted article cannot eat the whole budget or split the
+        // speaker prefix off its own second line.
+        val lines = history.map { (who, text) -> "$who：${text.replace('\n', ' ').take(300)}" }
+        var total = 0
+        val kept = ArrayList<String>()
+        for (l in lines.asReversed()) {
+            if (total + l.length > maxChars) break
+            kept.add(l); total += l.length + 1
+        }
+        kept.asReversed().forEach { sb.append(it).append('\n') }
+        return sb.toString()
+    }
+
+    /** Everything the deep model needs: the same state Jev saw, plus what Jev concluded. */
+    fun deepPrompt(
+        peer: String,
+        note: String,
+        style: String?,
+        history: String?,
+        relation: String?,
+        transcript: List<Pair<String, String>>,
+        answers: Map<String, Jev.Answer>,
+        fromOcr: Boolean,
+        hasImage: Boolean,
+        situation: String? = null,
+    ): String = buildString {
+        append("对方：").append(peer).append('\n')
+        if (note.isNotBlank()) append("关系背景：").append(note).append('\n')
+        style?.let { append("我平时的说话方式：").append(it).append('\n') }
+        history?.let { append("我们最近几轮的走向：").append(it).append('\n') }
+        relation?.let { append("这段关系的长期观察：").append(it).append('\n') }
+        append("\n最近的对话（从上到下）：\n")
+        transcript.forEach { (who, text) -> append(who).append("：").append(text).append('\n') }
+        append("\n小模型对最后一条的判断：\n")
+        for ((id, header) in Jev.headers(situation)) {
+            when (val a = answers[id] ?: continue) {
+                is Jev.Answer.Noul -> append("• ").append(header).append("：").append(Jev.pct(a.p)).append('\n')
+                is Jev.Answer.Dist -> append("• ").append(header).append("：").append(a.top)
+                    .append("（").append(Jev.pct(a.probs[a.top] ?: 0.0)).append("）\n")
+                is Jev.Answer.Scored -> append("• ").append(header).append("：")
+                    .append(Math.round(a.score) + 1).append(" / ").append(a.levels).append('\n')
+            }
+        }
+        if (fromOcr) {
+            append("\n注意：这些文字是从手机屏幕识别出来的，表情符号和表情包图片没有被识别出来。")
+            if (hasImage) append("随附的截图是完整画面，表情包和表情以截图为准。")
+        }
+    }
+}
