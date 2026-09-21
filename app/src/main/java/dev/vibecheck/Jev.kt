@@ -14,6 +14,8 @@ object Jev {
 
     data class Block(val header: String, val lines: List<String>)
 
+    const val MODEL = "jev-latest"
+
     /** id -> how to show it. Order here is the order on the card. */
     val DISPLAY: List<Pair<String, String>> = listOf(
         "literal" to "对方真的在说字面意思吗？",
@@ -71,14 +73,14 @@ object Jev {
         val intent = (answers["intent"] as? Answer.Dist)?.top ?: "闲聊"
         val action = (answers["action"] as? Answer.Dist)?.top
         val hint = when (intent) {
-            "在开玩笑或一起感慨" -> "在开玩笑，接着玩就行"
-            "在分享观点或心情" -> "在分享，回应一下就好"
-            "单纯想知道答案" -> "在问事，直接答"
-            else -> intent
+            "在开玩笑或一起感慨" -> L.t("在开玩笑，接着玩就行", "Joking around, just play along")
+            "在分享观点或心情" -> L.t("在分享，回应一下就好", "Sharing something, a small response is enough")
+            "单纯想知道答案" -> L.t("在问事，直接答", "Asking something, just answer")
+            else -> L.label(intent)
         }
         val line = if (action != null && action !in setOf("接梗顺着聊", "简单回应或认同", "正面回答问题"))
-            "$hint（建议：$action）" else hint
-        return listOf(Block("轻松", listOf(line)))
+            L.t("$hint（建议：${L.label(action)}）", "$hint (try: ${L.label(action)})") else hint
+        return listOf(Block(L.label("轻松"), listOf(line)))
     }
 
     /** Expanded card only: useful, but not worth the space on every message. */
@@ -93,16 +95,16 @@ object Jev {
                 is Answer.Noul -> {
                     // A near-coin-flip noul says nothing useful; keep the card short instead.
                     if (a.p in 0.35..0.65) continue
-                    blocks.add(Block(header, listOf("- 是: ${pct(a.p)}", "- 不是: ${pct(1 - a.p)}")))
+                    blocks.add(Block(L.label(header), listOf("- ${L.t("是", "yes")}: ${pct(a.p)}", "- ${L.t("不是", "no")}: ${pct(1 - a.p)}")))
                 }
                 is Answer.Dist -> {
                     val lines = a.probs.entries.sortedByDescending { it.value }.take(maxLines)
-                        .map { "- ${it.key}: ${pct(it.value)}" }
-                    blocks.add(Block(header, lines))
+                        .map { "- ${L.label(it.key)}: ${pct(it.value)}" }
+                    blocks.add(Block(L.label(header), lines))
                 }
                 is Answer.Scored -> {
                     val shown = Math.round(a.score).toInt() + 1   // levels are 0-based
-                    blocks.add(Block(header, listOf("$shown / ${a.levels}")))
+                    blocks.add(Block(L.label(header), listOf("$shown / ${a.levels}")))
                 }
             }
         }
@@ -120,11 +122,11 @@ object Jev {
         val need = (answers["need"] as? Answer.Dist)?.top
         val urgent = (answers["urgency"] as? Answer.Noul)?.p ?: 0.0
         return when {
-            level >= 0.6 && action != null ->
-                "提醒\n风险偏高，$action" + (need?.let { "，先满足「$it」" } ?: "") + "。"
-            level <= 0.2 && action != null ->
-                "很轻松，$action 就好，别想多。"
-            urgent < 0.3 && level < 0.5 -> "不急，晚点回也没关系。"
+            level >= 0.6 && action != null -> L.t(
+                "提醒\n风险偏高，$action" + (need?.let { "，先满足「$it」" } ?: "") + "。",
+                "Heads up\nRisk is high: ${L.label(action)}" + (need?.let { ", and give them ${L.label(it)} first" } ?: "") + ".")
+            level <= 0.2 && action != null -> L.t("很轻松，$action 就好，别想多。", "Easy one: ${L.label(action)}, don't overthink it.")
+            urgent < 0.3 && level < 0.5 -> L.t("不急，晚点回也没关系。", "No rush, replying later is fine.")
             else -> null
         }
     }
@@ -174,7 +176,7 @@ object Jev {
      * how urgent. Cheap, and enough to decide whether the turn deserves anything more.
      */
     fun triageBody(state: String): String = """
-        {"state":$state,"model":"jev-latest","questions":{
+        {"state":$state,"model":"$MODEL","questions":{
           "situation":{"type":"choice",
             "instructions":"这段对话属于哪一类关系和场合？只看对话本身和背景，不要假设一定是恋爱。",
             "criteria":{
@@ -308,7 +310,7 @@ object Jev {
               "先道歉":"不解释，先认错",
               "给一点空间":"不追问，稍后再联系"}}"""
         }
-        return """{"state":$state,"model":"jev-latest","questions":{$questions
+        return """{"state":$state,"model":"$MODEL","questions":{$questions
         }}"""
     }
 

@@ -122,7 +122,7 @@ object Learner {
 
     fun summary(m: Model): List<String> {
         val top = m.arms.entries.filter { it.value.n >= MIN_N }.sortedByDescending { it.value.mean }.take(5)
-        return listOf("更新 ${m.updates} 次，危险偏置 ${"%+.2f".format(m.dangerBias)}") +
+        return listOf(L.t("更新 ${m.updates} 次，危险偏置 ${"%+.2f".format(m.dangerBias)}", "${m.updates} updates, danger bias ${"%+.2f".format(m.dangerBias)}")) +
             top.map { "${it.key}  n=${it.value.n}  r=${"%+.2f".format(it.value.mean)}" }
     }
 

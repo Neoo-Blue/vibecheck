@@ -96,34 +96,34 @@ object Relation {
         if (total < 6) return null
         val parts = ArrayList<String>()
 
-        parts.add("共看到 $total 条（对方 ${s.theirMsgs}，我 ${s.myMsgs}）")
+        parts.add(L.t("共看到 $total 条（对方 ${s.theirMsgs}，我 ${s.myMsgs}）", "$total messages seen (them ${s.theirMsgs}, me ${s.myMsgs})"))
         val theirAvg = if (s.theirMsgs > 0) s.theirChars / s.theirMsgs else 0
         val myAvg = if (s.myMsgs > 0) s.myChars / s.myMsgs else 0
-        parts.add("平均长度 对方 $theirAvg 字 / 我 $myAvg 字")
+        parts.add(L.t("平均长度 对方 $theirAvg 字 / 我 $myAvg 字", "avg length them $theirAvg / me $myAvg chars"))
 
         if (s.sessions >= 2) {
             val pct = s.theyStarted * 100 / s.sessions
             parts.add(
                 when {
-                    pct >= 65 -> "多数时候是对方先开口（$pct%）"
-                    pct <= 35 -> "多数时候是我先开口（${100 - pct}%）"
-                    else -> "谁先开口大致对半"
+                    pct >= 65 -> L.t("多数时候是对方先开口（$pct%）", "they usually open ($pct%)")
+                    pct <= 35 -> L.t("多数时候是我先开口（${100 - pct}%）", "I usually open (${100 - pct}%)")
+                    else -> L.t("谁先开口大致对半", "we open about equally")
                 }
             )
         }
-        if (s.replySamples >= 3) parts.add("我平均 ${fmtDuration(s.replySecTotal / s.replySamples)} 回复")
+        if (s.replySamples >= 3) parts.add(L.t("我平均 ${fmtDuration(s.replySecTotal / s.replySamples)} 回复", "I reply in ${fmtDuration(s.replySecTotal / s.replySamples)} on average"))
         if (s.friction + s.calm >= 4) {
-            parts.add("判断过 ${s.friction + s.calm} 轮，其中 ${s.friction} 轮是高风险")
+            parts.add(L.t("判断过 ${s.friction + s.calm} 轮，其中 ${s.friction} 轮是高风险", "${s.friction + s.calm} turns judged, ${s.friction} high-risk"))
         }
-        if (s.daysSeen >= 2) parts.add("有 ${s.daysSeen} 天聊过")
+        if (s.daysSeen >= 2) parts.add(L.t("有 ${s.daysSeen} 天聊过", "chatted on ${s.daysSeen} days"))
         return parts.joinToString("；")
     }
 
     fun fmtDuration(sec: Long): String = when {
-        sec < 90 -> "$sec 秒"
-        sec < 3600 -> "${sec / 60} 分钟"
-        sec < 86400 -> "${sec / 3600} 小时"
-        else -> "${sec / 86400} 天"
+        sec < 90 -> L.t("$sec 秒", "$sec s")
+        sec < 3600 -> L.t("${sec / 60} 分钟", "${sec / 60} min")
+        sec < 86400 -> L.t("${sec / 3600} 小时", "${sec / 3600} h")
+        else -> L.t("${sec / 86400} 天", "${sec / 86400} d")
     }
 
     fun save(s: Stats): String = listOf(

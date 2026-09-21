@@ -85,6 +85,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
 
     override fun onServiceConnected() {
         prefs = Prefs(this)
+        prefs.lang   // applies the UI language to L
         card = OverlayCard(this, this)
         people = PersonStore(this)
         // No packageNames filter: with one, no event ever arrives from another app, so the card
@@ -306,13 +307,13 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         forceJudge = false
         if (key == lastKey) return
         if (busy) { main.removeCallbacks(scan); main.postDelayed(scan, 1500); return }   // judge it after the current call
-        if (prefs.apiKey.isBlank()) { card.showText("还没填 TypeSafe API Key", bubbles.last().box.toRect()); return }
+        Judge.missingKey(prefs)?.let { card.showText(it, bubbles.last().box.toRect()); return }
         lastKey = key
         busy = true
 
         val anchor = bubbles.last().box.toRect()
         val lastIncoming = (bubbles.lastOrNull { it.incoming } ?: bubbles.last()).text
-        card.showText("思考中…", anchor)
+        card.showText(L.t("思考中…", "Thinking…"), anchor)
 
         val transcript = Chat.transcript(bubbles)
         val background = people.background(record, prefs.context)
@@ -325,7 +326,6 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             relation = Relation.summary(record.stats),
             source = if (viaOcr) OCR_CAVEAT else null,
         )
-        val apiKey = prefs.apiKey
         val askedOn = screenGen
         Diag.lastRequest = Jev.triageBody(state)
         Diag.log("ask: ${transcript.size} 条上下文")
@@ -335,12 +335,12 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         // situation-specific question set asked, so the card's headers change with the situation
         // instead of every chat getting the same five blocks.
         io.execute {
-            val triage = runCatching { TypeSafe.ask(apiKey, Jev.triageBody(state)) }
+            val triage = runCatching { Judge.ask(prefs, Jev.triageBody(state)) }
             val routine = triage.map { Jev.isRoutine(it) }.getOrDefault(false)
             // No situation answer at all still gets the default set, not a two-block card.
             val situation = triage.getOrNull()?.let { (it["situation"] as? Jev.Answer.Dist)?.top } ?: ""
             val merged = triage.mapCatching { t ->
-                if (routine) t else t + TypeSafe.ask(apiKey, Jev.detailBody(state, situation))
+                if (routine) t else t + Judge.ask(prefs, Jev.detailBody(state, situation))
             }
             main.post {
                 busy = false
@@ -373,12 +373,12 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                         risk = riskNorm,
                     )
                     if (!routine && prefs.autoDeep && prefs.orKey.isNotBlank()) {
-                        deepCall("深度分析", OpenRouter.DEEP_SYSTEM, copyable = false, openCard = false)
+                        deepCall(L.t("深度分析", "Deep analysis"), OpenRouter.DEEP_SYSTEM, copyable = false, openCard = false)
                     }
                 }.onFailure { e ->
                     Diag.lastError = "ask: ${e.message}"
                     Diag.log(Diag.lastError)
-                    card.showText("Jev 调用失败：${e.message?.take(60)}", anchor)
+                    card.showText(L.t("Jev 调用失败：", "Jev call failed: ") + e.message?.take(60), anchor)
                     lastKey = null   // let the same message retry on the next screen change
                 }
             }
@@ -440,13 +440,13 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     // ---- OverlayCard.Actions: the buttons on the card ----
 
     override fun onDeepThink() = deepCall(
-        title = "深度分析",
+        title = L.t("深度分析", "Deep analysis"),
         system = OpenRouter.DEEP_SYSTEM,
         copyable = false,
     )
 
     override fun onSuggestReplies() = deepCall(
-        title = "可以这样回",
+        title = L.t("可以这样回", "You could say"),
         system = OpenRouter.REPLY_SYSTEM,
         copyable = true,
     )
@@ -460,7 +460,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
 
     override fun onLearn() {
         val rec = currentRecord
-        if (rec == null) { card.setExtra("学习此人", listOf("先在一个聊天页里打开卡片"), false); return }
+        if (rec == null) { card.setExtra(L.t("学习此人", "Learn this person"), listOf(L.t("先在一个聊天页里打开卡片", "Open the card inside a chat first")), false); return }
         if (learning) return
         learning = true
         learnRecord = rec
@@ -469,7 +469,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         learnScrolls = 0
         learnStale = 0
         Diag.log("learn: 开始读 ${rec.name} 的历史")
-        card.collapse("读", frozen = true)
+        card.collapse(L.t("读", "…"), frozen = true)
         learnStep()
     }
 
@@ -528,7 +528,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         val history = ArrayList(learnHistory)
         Diag.log("learn: 读完 ${history.size} 条")
         if (history.size < 4) {
-            card.setExtra("学习此人", listOf("只读到 ${history.size} 条，不够写档案"), false)
+            card.setExtra(L.t("学习此人", "Learn this person"), listOf(L.t("只读到 ${history.size} 条，不够写档案", "Only ${history.size} messages read, not enough for a profile")), false)
             return
         }
         // A full read is the better baseline than what was seen live, so it replaces the counts
@@ -546,10 +546,12 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         people.save(rec)
 
         if (prefs.orKey.isBlank()) {
-            card.setExtra("学习此人", listOf("读了 ${history.size} 条，统计已更新", "填了 OpenRouter Key 才能写档案"), false)
+            card.setExtra(L.t("学习此人", "Learn this person"), listOf(
+                L.t("读了 ${history.size} 条，统计已更新", "Read ${history.size} messages, statistics updated"),
+                L.t("填了 OpenRouter Key 才能写档案", "Add an OpenRouter key to get a profile")), false)
             return
         }
-        card.setExtra("学习此人", listOf("读了 ${history.size} 条，正在写档案…"), false)
+        card.setExtra(L.t("学习此人", "Learn this person"), listOf(L.t("读了 ${history.size} 条，正在写档案…", "Read ${history.size} messages, writing the profile…")), false)
         val prompt = OpenRouter.bioPrompt(rec.name, history)
         io.execute {
             val r = runCatching { OpenRouter.chat(prefs.orKey, prefs.deepModel, OpenRouter.BIO_SYSTEM, prompt, null) }
@@ -560,11 +562,11 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                     fresh.bio = bio.trim()
                     people.save(fresh)
                     Diag.log("learn: ${rec.name} 档案已写")
-                    card.setExtra("已学会 ${rec.name}（${history.size} 条）",
+                    card.setExtra(L.t("已学会 ${rec.name}（${history.size} 条）", "Learned ${rec.name} (${history.size} messages)"),
                         bio.lines().map { it.trim() }.filter { it.isNotEmpty() }, false)
                 }.onFailure {
                     Diag.log("learn: 写档案失败 ${it.message}")
-                    card.setExtra("学习此人", listOf("读了 ${history.size} 条，档案没写成：${it.message?.take(60)}"), false)
+                    card.setExtra(L.t("学习此人", "Learn this person"), listOf(L.t("读了 ${history.size} 条，档案没写成：", "Read ${history.size} messages, profile failed: ") + it.message?.take(60)), false)
                 }
             }
         }
@@ -609,7 +611,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     override fun onCopy(text: String) {
         val cm = getSystemService(ClipboardManager::class.java)
         cm.setPrimaryClip(ClipData.newPlainText("jev", text))
-        card.setExtra("已复制，去输入框长按粘贴", listOf(text), false)
+        card.setExtra(L.t("已复制，去输入框长按粘贴", "Copied, long-press the input box to paste"), listOf(text), false)
     }
 
     /**
@@ -617,14 +619,14 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
      * from OCR, so the emoji and stickers that OCR cannot read are still part of the picture.
      */
     private fun deepCall(title: String, system: String, copyable: Boolean, openCard: Boolean = true) {
-        val c = ctx ?: run { if (openCard) card.setExtra(title, listOf("还没有可分析的对话"), false); return }
+        val c = ctx ?: run { if (openCard) card.setExtra(title, listOf(L.t("还没有可分析的对话", "Nothing judged yet")), false); return }
         if (deepBusy) return
         if (prefs.orKey.isBlank()) {
-            if (openCard) card.setExtra(title, listOf("还没填 OpenRouter Key，去设置里填"), false)
+            if (openCard) card.setExtra(title, listOf(L.t("还没填 OpenRouter Key，去设置里填", "No OpenRouter key yet; add one in settings")), false)
             return
         }
         deepBusy = true
-        if (openCard) card.setExtra(title, listOf("思考中…"), false)
+        if (openCard) card.setExtra(title, listOf(L.t("思考中…", "Thinking…")), false)
 
         // Bind the answer to the turn it was asked about: an automatic pass that lands after a
         // new message must not be pinned onto the wrong card.
@@ -649,7 +651,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                     .onFailure { Diag.lastError = "deep: ${it.message}"; Diag.log(Diag.lastError) }
                 finish(
                     r.map { text -> text.lines().map { it.trim() }.filter { it.isNotEmpty() } }
-                        .getOrElse { listOf("失败：${it.message?.take(80)}") }
+                        .getOrElse { listOf(L.t("失败：", "Failed: ") + it.message?.take(80)) }
                 )
             }
         }
@@ -691,7 +693,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
 
     private fun footerWith(l: Learned): String? {
         val base = Jev.footer(l.answers)
-        val note = if (l.adjusted) "（已按你们过去的走向调整）" else null
+        val note = if (l.adjusted) L.t("（已按你们过去的走向调整）", "(adjusted from how things went before)") else null
         return listOfNotNull(base, note).joinToString("\n").ifBlank { null }
     }
 
@@ -748,7 +750,9 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         service      : ${if (Diag.connected) "connected" else "down"}
         enabled      : ${prefs.enabled}  debug=${prefs.debug}  learning=${prefs.learning}
         packages     : ${prefs.packages}
+        judge        : ${prefs.judge}
         api key      : ${if (prefs.apiKey.isBlank()) "MISSING" else "set (${prefs.apiKey.length} chars)"}
+        openrouter   : ${if (prefs.orKey.isBlank()) "MISSING" else "set (${prefs.orKey.length} chars)"}
         foreground   : ${rootInActiveWindow?.packageName ?: "?"}
         last scan    : ${Diag.lastScan}
         last error   : ${Diag.lastError.ifBlank { "none" }}

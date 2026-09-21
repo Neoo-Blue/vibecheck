@@ -121,6 +121,15 @@ class AdaptiveTest {
         assertFalse("without a situation the default headers apply", none.contains("时间压力"))
     }
 
+    @Test fun openRouterRouteOnlySwapsTheModelId() {
+        val body = Jev.triageBody(state)
+        assertTrue(body.contains("\"model\":\"jev-latest\""))
+        val via = Judge.viaOpenRouter(body)
+        assertTrue(via.contains("\"model\":\"~typesafe/jev-latest\""))
+        assertFalse(via.contains("\"model\":\"jev-latest\""))
+        assertEquals(body.length - "jev-latest".length + "~typesafe/jev-latest".length, via.length)
+    }
+
     @Test fun bulkObserveCountsBothSidesWithoutTiming() {
         val s = Relation.Stats()
         Relation.observeBulk(s, listOf("对方" to "你好呀", "我" to "嗨", "对方" to "在干嘛", "我" to "看剧"))

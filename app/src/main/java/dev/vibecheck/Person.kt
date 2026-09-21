@@ -116,8 +116,11 @@ object Person {
     fun styleSummary(s: Style): String? {
         if (s.msgs < 3) return null
         val pct = { n: Int -> "${n * 100 / s.msgs}%" }
-        return "平均 ${s.chars / s.msgs} 字，带表情 ${pct(s.emoji.coerceAtMost(s.msgs))}，" +
-            "问句 ${pct(s.questions)}，道歉 ${pct(s.apologies)}（共 ${s.msgs} 条）"
+        return L.t(
+            "平均 ${s.chars / s.msgs} 字，带表情 ${pct(s.emoji.coerceAtMost(s.msgs))}，" +
+                "问句 ${pct(s.questions)}，道歉 ${pct(s.apologies)}（共 ${s.msgs} 条）",
+            "avg ${s.chars / s.msgs} chars, emoji ${pct(s.emoji.coerceAtMost(s.msgs))}, " +
+                "questions ${pct(s.questions)}, apologies ${pct(s.apologies)} (${s.msgs} messages)")
     }
 
     /** Fold another record's style into this one (linking the same person across apps). */
@@ -143,7 +146,9 @@ object Person {
 
     fun historySummary(history: List<Turn>): String? {
         if (history.isEmpty()) return null
-        return history.takeLast(5).joinToString("；") { "${it.intent}/危${it.danger}/${it.action}" }
+        return history.takeLast(5).joinToString(L.t("；", "; ")) {
+            L.t("${it.intent}/危${it.danger}/${it.action}", "${L.label(it.intent)} / risk ${it.danger} / ${L.label(it.action)}")
+        }
     }
 
     fun saveHistory(history: List<Turn>): String =

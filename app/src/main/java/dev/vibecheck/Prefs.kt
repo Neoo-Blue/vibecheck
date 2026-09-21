@@ -32,7 +32,17 @@ class Prefs(ctx: Context) {
         get() = sp.getBoolean("learn", true)
         set(v) = sp.edit().putBoolean("learn", v).apply()
 
-    /** OpenRouter, used only for the on-demand 深思 / 回复 buttons. */
+    /** "zh" or "en". Applied to L on every read so the service and the settings screen agree. */
+    var lang: String
+        get() = (sp.getString("lang", "zh") ?: "zh").also { L.en = it == "en" }
+        set(v) { sp.edit().putString("lang", v).apply(); L.en = v == "en" }
+
+    /** Which engine answers Jev's questions: Judge.TYPESAFE or Judge.OPENROUTER. */
+    var judge: String
+        get() = sp.getString("judge", Judge.TYPESAFE) ?: Judge.TYPESAFE
+        set(v) = sp.edit().putString("judge", v).apply()
+
+    /** OpenRouter: 深思 / 回复 / 学习此人, and judging when judge == OPENROUTER. */
     var orKey: String
         get() = sp.getString("orkey", "") ?: ""
         set(v) = sp.edit().putString("orkey", v.trim()).apply()

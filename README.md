@@ -13,7 +13,7 @@ LINE, KakaoTalk, plus any chat app whose layout puts them on the left and you on
 (enter the package name). Discord and Slack put every message on the left, so the geometry
 cannot tell you apart; they are left out.
 
-The in-app UI is currently Chinese.
+The in-app UI is bilingual: switch between English and 中文 at the top of the settings screen.
 
 ## Judging happens in two steps
 
@@ -40,12 +40,20 @@ the situation**, so a work chat and a first chat with a stranger show different 
 Jev only returns judgments with probabilities; it never writes lines for you. The "suggested
 move" at the bottom of the card is computed in code from `danger`.
 
+Jev can be reached two ways, same request and same answers: TypeSafe's own API
+(`api.typesafe.ai`, the default) or OpenRouter's decisions endpoint
+(`openrouter.ai/api/alpha/decisions`, model `~typesafe/jev-latest`). The question sets are
+written in Chinese and stay that way in both UI languages, because their option keys are what
+the per-person learning is stored under; Jev reads English chats just as well.
+
 ## Install
 
 1. Build it yourself (see Development) and copy `app/build/outputs/apk/debug/app-debug.apk`
    to the phone, or grab the APK from the latest release.
-2. Open the app, paste a TypeSafe API key and tap "测试 API Key" to confirm it works. For deep
-   analysis, reply drafts and "learn this person", add an OpenRouter key. Save.
+2. Open the app, paste a TypeSafe API key and tap "Test judging engine" to confirm it works. For
+   deep analysis, reply drafts and "learn this person", add an OpenRouter key. Save.
+   **No TypeSafe key?** Jev is also served by OpenRouter: pick "Jev via OpenRouter" under
+   Judging engine and one OpenRouter key covers everything. TypeSafe's own API is the default.
 3. Tap "打开无障碍设置" and enable **Vibecheck 读空气**.
    **Toggle greyed out?** Android 13+ restricts sideloaded apps. Settings → Apps → Vibecheck →
    menu (⋮) → Allow restricted settings → confirm your lock screen, then enable it.
@@ -226,8 +234,8 @@ with what is actually on screen.
 
 ## Privacy
 
-Chat text goes to `api.typesafe.ai` for judging and, when you press the buttons, to
-`openrouter.ai`. API keys and learning state live in the app's private SharedPreferences.
+Chat text goes to `api.typesafe.ai` for judging (or to `openrouter.ai` if you chose that
+engine) and, when you press the buttons, to `openrouter.ai`. API keys and learning state live in the app's private SharedPreferences.
 The debug endpoint is LAN-only and token-gated but can read chat content: do not enable it on
 public Wi-Fi. This is a personal tool for your own phone and your own conversations.
 

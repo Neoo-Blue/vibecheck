@@ -8,11 +8,11 @@ package dev.vibecheck
  */
 object Apps {
     val KNOWN: List<Pair<String, String>> = listOf(
-        "com.tencent.mm" to "微信",
+        "com.tencent.mm" to "WeChat 微信",
         "cn.soulapp.android" to "Soul",
         "com.facebook.orca" to "Messenger",
-        "com.google.android.apps.messaging" to "Google Messages（短信 / RCS）",
-        "com.samsung.android.messaging" to "三星信息（短信 / RCS）",
+        "com.google.android.apps.messaging" to "Google Messages (SMS / RCS)",
+        "com.samsung.android.messaging" to "Samsung Messages (SMS / RCS)",
         "com.whatsapp" to "WhatsApp",
         "com.whatsapp.w4b" to "WhatsApp Business",
         "org.telegram.messenger" to "Telegram",

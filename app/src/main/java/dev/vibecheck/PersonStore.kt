@@ -140,18 +140,18 @@ class PersonStore(ctx: Context) {
     /** One line per person, for the settings screen and the /people route. */
     fun summary(): String {
         val ids = index()
-        if (ids.isEmpty()) return "还没有记住任何人"
+        if (ids.isEmpty()) return L.t("还没有记住任何人", "Nobody remembered yet")
         return ids.joinToString("\n") { id ->
             val r = loadId(id)
             val bits = listOfNotNull(
                 Person.styleSummary(r.style),
                 Relation.summary(r.stats),
                 Learner.summary(r.model).first(),
-                r.note.takeIf { it.isNotBlank() }?.let { "背景：$it" },
-                r.bio.takeIf { it.isNotBlank() }?.let { "学到（${r.learned} 条）：${it.take(80)}" },
+                r.note.takeIf { it.isNotBlank() }?.let { L.t("背景：$it", "note: $it") },
+                r.bio.takeIf { it.isNotBlank() }?.let { L.t("学到（${r.learned} 条）：${it.take(80)}", "learned (${r.learned} msgs): ${it.take(80)}") },
             )
             "${r.name}（${r.apps.joinToString(" · ") { Apps.label(it) }}）\n  " +
-                (if (bits.isEmpty()) "刚认识，还没积累" else bits.joinToString("\n  "))
+                (if (bits.isEmpty()) L.t("刚认识，还没积累", "just met, nothing learned yet") else bits.joinToString("\n  "))
         }
     }
 }

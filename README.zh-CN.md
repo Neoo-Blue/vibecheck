@@ -34,10 +34,16 @@ Instagram、Google Messages（短信 / RCS）、三星信息、Signal、Snapchat
 
 Jev 只给判断和概率，不写话术。卡片底部的「建议动作」是代码按 `danger` 算出来的。
 
+Jev 有两条路，请求和答案一模一样：TypeSafe 自己的接口（`api.typesafe.ai`，默认），
+或 OpenRouter 的 decisions 接口（`openrouter.ai/api/alpha/decisions`，模型 `~typesafe/jev-latest`）。
+应用界面在设置最上面可切换中文 / English；问题集始终是中文的，因为选项原文就是每个人学习记录的键，
+Jev 读英文聊天一样准。
+
 ## 安装
 
 1. 从 Releases 页下载 APK，或自己编译（见最后的「开发」）后把 `app/build/outputs/apk/debug/app-debug.apk` 传到手机安装。
-2. 打开 App，填 TypeSafe API Key，点「测试 API Key」确认能通；要用深思 / 回复 / 学习此人，再填 OpenRouter Key。保存。
+2. 打开 App，填 TypeSafe API Key，点「测试判断引擎」确认能通；要用深思 / 回复 / 学习此人，再填 OpenRouter Key。保存。
+   **没有 TypeSafe Key？** OpenRouter 上也有 Jev：判断引擎选「Jev，走 OpenRouter」，一个 OpenRouter Key 全搞定。默认仍走 TypeSafe 自己的接口。
 3. 点「打开无障碍设置」，开启「Vibecheck 读空气」。
    **开关是灰的**：Android 13+ 对侧载应用有「受限设置」保护。
    设置 → 应用 → Vibecheck 读空气 → 右上角菜单 → 允许受限设置 → 验证锁屏密码，再回来开启。
@@ -195,7 +201,7 @@ curl "http://<手机IP>:8848/status?t=<口令>"
 
 ## 隐私
 
-聊天文本会发到 `api.typesafe.ai`。API Key 和学习状态存在应用私有 SharedPreferences 里。
+聊天文本会发到 `api.typesafe.ai`（选了 OpenRouter 引擎则发到 `openrouter.ai`）。API Key 和学习状态存在应用私有 SharedPreferences 里。
 排查接口只在局域网，且每个请求都要口令，但它能读出聊天内容，别在公共 Wi-Fi 上开。
 这是自用工具：只在你自己的手机、自己的对话上用。
 

@@ -209,7 +209,7 @@ class OverlayCard(private val svc: AccessibilityService, private val actions: Ac
             setPadding(dp(12), dp(10), dp(12), dp(8))
         }
         content.addView(line("Jev：", 12f, HEADER, dp(4)))
-        if (blocks.isEmpty()) content.addView(line("正在看这段对话…", 12f, BODY, dp(2)))
+        if (blocks.isEmpty()) content.addView(line(L.t("正在看这段对话…", "Reading this conversation…"), 12f, BODY, dp(2)))
         for (b in if (expanded) blocks + moreBlocks else blocks) {
             content.addView(line(b.header, 12f, TITLE, dp(2)))
             for (l in b.lines) content.addView(line(l, 12f, BODY, dp(1)))
@@ -232,7 +232,7 @@ class OverlayCard(private val svc: AccessibilityService, private val actions: Ac
                 }
                 content.addView(tv)
             }
-            if (extraCopyable) content.addView(line("点一条即可复制", 10f, HEADER, 0))
+            if (extraCopyable) content.addView(line(L.t("点一条即可复制", "Tap one to copy"), 10f, HEADER, 0))
         }
 
         content.addView(toolbar())
@@ -282,10 +282,10 @@ class OverlayCard(private val svc: AccessibilityService, private val actions: Ac
 
     private fun toolbar(): View = LinearLayout(svc).apply {
         orientation = LinearLayout.HORIZONTAL
-        addView(chip(if (expanded) "收起" else "展开") { expanded = !expanded; renderCard() })
-        addView(chip("深思") { actions.onDeepThink() })
-        addView(chip("回复") { actions.onSuggestReplies() })
-        addView(chip("学习") { actions.onLearn() })
+        addView(chip(if (expanded) L.t("收起", "Less") else L.t("展开", "More")) { expanded = !expanded; renderCard() })
+        addView(chip(L.t("深思", "Think")) { actions.onDeepThink() })
+        addView(chip(L.t("回复", "Reply")) { actions.onSuggestReplies() })
+        addView(chip(L.t("学习", "Learn")) { actions.onLearn() })
         addView(chip("✕") { open = false; expanded = false; renderBubble() })
     }
 

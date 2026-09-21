@@ -13,11 +13,11 @@ object TypeSafe {
     class Failure(val status: Int, message: String) : Exception(message)
 
     /** Blocking. Call from a background thread. Retries 429/529 once with a short backoff. */
-    fun ask(apiKey: String, body: String): Map<String, Jev.Answer> {
+    fun ask(apiKey: String, body: String, endpoint: String = ENDPOINT): Map<String, Jev.Answer> {
         var attempt = 0
         while (true) {
             try {
-                return parse(post(apiKey, body))
+                return parse(post(apiKey, body, endpoint))
             } catch (e: Failure) {
                 if ((e.status == 429 || e.status == 529) && attempt < 2) {
                     attempt++
@@ -27,14 +27,15 @@ object TypeSafe {
         }
     }
 
-    private fun post(apiKey: String, body: String): String {
-        val conn = (URL(ENDPOINT).openConnection() as HttpURLConnection).apply {
+    private fun post(apiKey: String, body: String, endpoint: String): String {
+        val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 10_000
             readTimeout = 20_000
             doOutput = true
             setRequestProperty("Authorization", "Bearer $apiKey")
             setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("X-Title", "Vibecheck")
         }
         try {
             conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
