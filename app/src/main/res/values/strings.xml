@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Vibecheck 读空气</string>
-    <string name="service_desc">读取聊天页面上可见的消息，调用 TypeSafe Jev 判断对方的意图和这一步的风险，用屏幕边缘的一个小气泡告诉你。</string>
+    <string name="app_name">Vibecheck</string>
+    <string name="service_desc">Reads the messages visible in a chat, asks TypeSafe Jev what the other side means and how risky this turn is, and tells you through a small bubble at the edge of the screen.</string>
 </resources>

@@ -1,4 +1,4 @@
-# Vibecheck · 读空气
+# Vibecheck
 
 **English** · [中文](README.zh-CN.md)
 
@@ -13,7 +13,7 @@ LINE, KakaoTalk, plus any chat app whose layout puts them on the left and you on
 (enter the package name). Discord and Slack put every message on the left, so the geometry
 cannot tell you apart; they are left out.
 
-The in-app UI is bilingual: switch between English and 中文 at the top of the settings screen.
+The in-app UI is bilingual (English and Chinese); it follows the phone's language and can be switched at the top of the settings screen.
 
 ## Judging happens in two steps
 
@@ -54,7 +54,7 @@ the per-person learning is stored under; Jev reads English chats just as well.
    deep analysis, reply drafts and "learn this person", add an OpenRouter key. Save.
    **No TypeSafe key?** Jev is also served by OpenRouter: pick "Jev via OpenRouter" under
    Judging engine and one OpenRouter key covers everything. TypeSafe's own API is the default.
-3. Tap "打开无障碍设置" and enable **Vibecheck 读空气**.
+3. Tap "Open accessibility settings" and enable **Vibecheck**.
    **Toggle greyed out?** Android 13+ restricts sideloaded apps. Settings → Apps → Vibecheck →
    menu (⋮) → Allow restricted settings → confirm your lock screen, then enable it.
 4. Open a chat. A small bubble appears at the right edge; about half a second after a
@@ -108,15 +108,15 @@ taps outside it go straight through.
 
 | button | what it does |
 |---|---|
-| 展开 / 收起 | expand shows "what kind of chat" and "answer now?" and lays out the deep analysis in full |
-| 深思 | one deep pass through DeepSeek on OpenRouter: what they care about, the trap in this step, a concrete next move |
-| 回复 | three reply drafts in **your own way of speaking**; tap one to copy, long-press the input box to paste |
-| 学习 | read this person's whole history and write a profile (see "Learn this person") |
+| More / Less | expand shows "what kind of chat" and "answer now?" and lays out the deep analysis in full |
+| Think | one deep pass through DeepSeek on OpenRouter: what they care about, the trap in this step, a concrete next move |
+| Reply | three reply drafts in **your own way of speaking**; tap one to copy, long-press the input box to paste |
+| Learn | read this person's whole history and write a profile (see "Learn this person") |
 | ✕ | back to the bubble |
 
-深思 and 回复 only run when you press them (roughly $0.0002 to $0.001 each). Every new message
+Think and Reply only run when you press them (roughly $0.0002 to $0.001 each). Every new message
 runs Jev alone: a few hundred milliseconds, cheap. Turns that deserve it also get an automatic
-deep pass; the bubble shows 深 when there is something to read.
+deep pass; the bubble shows ✦ when there is something to read.
 
 **On WeChat the deep pass also takes a screenshot** and uses a vision model (default
 `deepseek/deepseek-v4-flash-vision-exp`), because OCR cannot read stickers and emoji and those
@@ -171,7 +171,7 @@ transcript is kept.
 
 ### Learn this person
 
-Open the card in a chat and tap 学习. The card drops to the bubble, which shows the running
+Open the card in a chat and tap Learn. The card drops to the bubble, which shows the running
 count, and the app pages up through the history by itself. Each page's new lines are joined
 onto the front, aligned by the overlap between pages rather than by de-duplicating text, so
 "ok" sent thirty times stays thirty messages. It stops after four pages without new content or
@@ -181,14 +181,14 @@ covers fewer messages than the live count does not overwrite the statistics.
 
 ### One person across apps
 
-When 小李 on WeChat and Sam on Messenger are the same person, pick one in settings, tap
-"和另一个人合并", and choose the other. Counts, speaking style, recent turns, profile and bandit
+When Li on WeChat and Sam on Messenger are the same person, pick one in settings, tap
+"Merge with another person", and choose the other. Counts, speaking style, recent turns, profile and bandit
 are folded together (arms pool their samples, the danger bias is weighted by how much each side
 learned), and from then on either chat opens the same memory.
 
 ## Debugging while it runs
 
-Enable "局域网排查接口" in settings and any computer on the same Wi-Fi can read the live state,
+Enable "LAN debug endpoint" in settings and any computer on the same Wi-Fi can read the live state,
 no adb and no restart:
 
 ```

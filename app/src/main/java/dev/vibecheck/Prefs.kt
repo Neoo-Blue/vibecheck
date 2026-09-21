@@ -32,9 +32,10 @@ class Prefs(ctx: Context) {
         get() = sp.getBoolean("learn", true)
         set(v) = sp.edit().putBoolean("learn", v).apply()
 
-    /** "zh" or "en". Applied to L on every read so the service and the settings screen agree. */
+    /** "zh" or "en", defaulting to the phone's language. Applied to L on every read so the service and the settings screen agree. */
     var lang: String
-        get() = (sp.getString("lang", "zh") ?: "zh").also { L.en = it == "en" }
+        get() = (sp.getString("lang", null) ?: if (java.util.Locale.getDefault().language == "zh") "zh" else "en")
+            .also { L.en = it == "en" }
         set(v) { sp.edit().putString("lang", v).apply(); L.en = v == "en" }
 
     /** Which engine answers Jev's questions: Judge.TYPESAFE or Judge.OPENROUTER. */

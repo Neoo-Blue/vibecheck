@@ -40,7 +40,7 @@ class MainActivity : Activity() {
             setPadding(48, 56, 48, 48)
         }
 
-        root.addView(label("Vibecheck 读空气", 22f))
+        root.addView(label(L.t("Vibecheck 读空气", "Vibecheck"), 22f))
         status = label("", 13f)
         root.addView(status)
 
@@ -263,7 +263,7 @@ class MainActivity : Activity() {
             "聊天内容会发送到 api.typesafe.ai（或 openrouter.ai）进行判断。",
             "\nHow to use\n" +
             "1. Enter a key and save.\n" +
-            "2. Open accessibility settings and enable \"Vibecheck 读空气\".\n" +
+            "2. Open accessibility settings and enable \"Vibecheck\".\n" +
             "3. Toggle greyed out (Android 13+ restricts sideloaded apps)? Settings → Apps → Vibecheck → menu → Allow restricted settings, then enable it.\n" +
             "4. Open a chat: a small bubble appears at the right edge; it takes on a colour after a message arrives. Tap it for the card.\n" +
             "5. No bubble? Turn on debug mode to see what the service actually reads.\n\n" +

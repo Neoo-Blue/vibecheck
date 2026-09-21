@@ -112,7 +112,7 @@ class OverlayCard(private val svc: AccessibilityService, private val actions: Ac
         } else if (open) {
             renderCard()
         } else {
-            badge = "深"
+            badge = L.t("深", "✦")
             renderBubble()
         }
     }
