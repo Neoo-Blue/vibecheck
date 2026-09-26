@@ -1,0 +1,101 @@
+name: Release
+
+# Push a tag like v6.6.0 (it has to match versionName in app/build.gradle.kts), or run this by
+# hand with a tag. It tests, builds the release APK and publishes it as vibecheck-<version>.apk,
+# with the notes from that version's section of CHANGELOG.md. Running it again for an existing
+# release replaces the APK, e.g. after adding the signing key below.
+#
+# Signing: set the repository secret DEBUG_KEYSTORE_BASE64 to the base64 of the debug.keystore
+# that signed earlier releases (base64 -w0 ~/.android/debug.keystore) and the APK installs over
+# them as an update. Without it Gradle makes a one-off key and the notes say so.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to publish, e.g. v6.6.0 (created on the chosen branch if it does not exist)
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches the app version
+        run: |
+          VERSION=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' app/build.gradle.kts)
+          if [ "$TAG" != "v$VERSION" ]; then
+            echo "::error::Tag $TAG does not match versionName $VERSION in app/build.gradle.kts"
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Restore the signing key, if there is one
+        env:
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
+            mkdir -p ~/.android
+            echo "$DEBUG_KEYSTORE_BASE64" | base64 -d > ~/.android/debug.keystore
+            echo "SIGNING=kept" >> "$GITHUB_ENV"
+          else
+            echo "SIGNING=one-off" >> "$GITHUB_ENV"
+          fi
+
+      - name: Unit tests and release APK
+        run: ./gradlew --no-daemon testDebugUnitTest assembleRelease
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          APK="vibecheck-$VERSION.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$APK"
+          SHA=$(sha256sum "$APK" | cut -d' ' -f1)
+
+          # This version's section of the changelog, without its heading.
+          awk -v v="$VERSION" '/^## / { if (found) exit; if ($2 == v) { found = 1; next } } found' CHANGELOG.md > notes.md
+
+          if [ "$SIGNING" = kept ]; then
+            EN="Signed with the same key as earlier releases, so it installs over them as an update."
+            ZH="与之前的版本使用同一个签名，可以直接覆盖安装升级。"
+          else
+            EN="Signed with a key made for this build only, so Android will not install it over an earlier release or a build you made yourself: uninstall that first (this erases the saved keys and people memory)."
+            ZH="这个版本的签名是单独生成的，系统不会让它覆盖安装之前的版本或你自己编译的版本：请先卸载旧版（会清掉保存的 Key 和人物记忆）。"
+          fi
+          {
+            echo
+            echo "---"
+            echo
+            echo "**Install.** Download \`$APK\`, install it, add a key, and enable **Vibecheck** under Accessibility (Android 13+: App info → ⋮ → Allow restricted settings first). $EN"
+            echo
+            echo "**安装。** 下载 \`$APK\` 安装，填 Key，在无障碍设置里开启「Vibecheck 读空气」（Android 13+ 先在应用信息 → ⋮ → 允许受限设置）。$ZH"
+            echo
+            echo "SHA-256: \`$SHA\`"
+          } >> notes.md
+
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" "$APK" --clobber
+            gh release edit "$TAG" --notes-file notes.md
+          else
+            gh release create "$TAG" "$APK" --target "$GITHUB_SHA" --title "Vibecheck $VERSION" --notes-file notes.md
+          fi
