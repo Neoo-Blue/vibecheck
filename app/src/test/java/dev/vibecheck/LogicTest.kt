@@ -81,7 +81,7 @@ class LogicTest {
         assertEquals("- 是: 7%", blocks[0].lines[0])
         assertEquals("- 不是: 93%", blocks[0].lines[1])
         assertEquals("- 想确认你在不在乎: 72%", blocks[1].lines[0])
-        assertEquals("5 / 6", blocks[2].lines[0])
+        assertEquals("5 / 6 · 很危险", blocks[2].lines[0])   // the level says which end is bad
     }
 
     @Test fun footerReflectsThisTurnNotAFixedTemplate() {

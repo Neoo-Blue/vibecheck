@@ -17,7 +17,8 @@ object OpenRouter {
 
     private const val ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 
-    class Failure(message: String) : Exception(message)
+    /** [status] is the HTTP status, or the error code OpenRouter put in a 200 body; 0 when unknown. */
+    class Failure(val status: Int, message: String) : Exception(message)
 
     /** Blocking. Call from a background thread. imageJpegBase64 null means text-only. */
     fun chat(apiKey: String, model: String, system: String, user: String, imageJpegBase64: String?): String {
@@ -60,10 +61,12 @@ object OpenRouter {
             val code = conn.responseCode
             val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
                 ?.bufferedReader()?.use(BufferedReader::readText) ?: ""
-            if (code !in 200..299) throw Failure("HTTP $code: ${text.take(160)}")
+            if (code !in 200..299) throw Failure(code, "HTTP $code: ${text.take(160)}")
             val root = JSONObject(text)
-            val choices = root.optJSONArray("choices")
-                ?: throw Failure(root.optJSONObject("error")?.optString("message") ?: "no choices: ${text.take(160)}")
+            val choices = root.optJSONArray("choices")?.takeIf { it.length() > 0 }
+                ?: root.optJSONObject("error").let { err ->
+                    throw Failure(err?.optInt("code") ?: 0, err?.optString("message") ?: "no choices: ${text.take(160)}")
+                }
             val choice = choices.getJSONObject(0)
             val msg = choice.getJSONObject("message")
             // optString() on a JSON null returns the literal "null" on Android, which is how a
@@ -72,7 +75,7 @@ object OpenRouter {
             if (content.isNotEmpty()) return content
             // Never fall back to the reasoning field: that is the model's private scratchpad, and
             // showing it produced a card full of "但用户要求…" deliberation instead of replies.
-            throw Failure("模型没写完，再点一次")
+            throw Failure(0, L.t("模型没写完，再点一次", "The model stopped before answering; try again"))
         } finally {
             conn.disconnect()
         }
@@ -89,7 +92,7 @@ object OpenRouter {
             "care about; the trap in this step; one next move concrete enough to do as written. Max 20 words each.")
 
     val REPLY_SYSTEM: String get() = L.t(
-        "你替用户起草中文回复。必须贴着用户平时的说话方式：长度、语气、标点、是否用表情都要像他本人。" +
+        "你替用户起草回复，用这段对话本身的语言（对话是英文就写英文）。必须贴着用户平时的说话方式：长度、语气、标点、是否用表情都要像他本人。" +
             "给三条不同策略的候选：第一条先接住情绪，第二条给具体方案，第三条轻松化解。" +
             "每条单独一行，用「1. 」「2. 」「3. 」开头，每条不超过 30 个字，不要解释。",
         "You draft replies for the user, in the language the conversation is in. Match how the user " +
@@ -106,6 +109,28 @@ object OpenRouter {
             "Only what the history shows; invent nothing. Four to six lines, each starting with \"•\", max 20 words: " +
             "who they are to me (relationship, closeness); what we usually talk about; how they write (length, tone, " +
             "catchphrases, emoji); how I write to them; recurring topics or sore spots; what they care about.")
+
+    /** "1. ", "1.你好", "1．", "2、", "3) ", "- ", "• ": a numbered or bulleted line, but not "1.5 hours works". */
+    private val DRAFT_PREFIX = Regex("""^\s*(\d{1,2}([.．](?!\d)|[、)）])\s*|[-•*·]\s+)""")
+
+    /**
+     * The reply drafts in a model answer, ready to paste: without the numbering and without the
+     * quotes around them. When the answer has numbered lines, anything else ("Here are three
+     * options:") is dropped instead of becoming a draft of its own.
+     */
+    fun drafts(answer: String): List<String> {
+        val lines = answer.lines().map { it.trim() }.filter { it.isNotEmpty() }
+        val numbered = lines.filter { DRAFT_PREFIX.containsMatchIn(it) }
+        return (if (numbered.size >= 2) numbered else lines).map { draftText(it) }.filter { it.isNotEmpty() }
+    }
+
+    fun draftText(line: String): String {
+        var s = line.replaceFirst(DRAFT_PREFIX, "").trim()
+        for ((open, close) in listOf('"' to '"', '“' to '”', '「' to '」', '『' to '』')) {
+            if (s.length >= 2 && s.first() == open && s.last() == close) s = s.substring(1, s.length - 1).trim()
+        }
+        return s.ifEmpty { line.trim() }
+    }
 
     /** A history read, oldest first, trimmed to what the model needs. */
     fun bioPrompt(peer: String, history: List<Pair<String, String>>, maxChars: Int = 6000): String {
@@ -152,7 +177,9 @@ object OpenRouter {
                 is Jev.Answer.Dist -> append("• ").append(L.label(header)).append(L.t("：", ": ")).append(L.label(a.top))
                     .append(L.t("（", " (")).append(Jev.pct(a.probs[a.top] ?: 0.0)).append(L.t("）\n", ")\n"))
                 is Jev.Answer.Scored -> append("• ").append(L.label(header)).append(L.t("：", ": "))
-                    .append(Math.round(a.score) + 1).append(" / ").append(a.levels).append('\n')
+                    .append(Jev.shownLevel(a)).append(" / ").append(a.levels)
+                    .append(Jev.levelName(id, a)?.let { L.t("（${L.label(it)}）", " (${L.label(it)})") } ?: "")
+                    .append('\n')
             }
         }
         if (fromOcr) {

@@ -12,6 +12,8 @@ object Relation {
 
     private const val SESSION_GAP_MS = 2 * 60 * 60 * 1000L   // a fresh conversation after 2h quiet
     private const val DAY_MS = 24 * 60 * 60 * 1000L
+    /** One reply-time sample is capped here: a reply sent from another device days later is not "my pace". */
+    private const val MAX_WAIT_SEC = 24 * 60 * 60L
 
     data class Stats(
         var theirMsgs: Int = 0,
@@ -44,16 +46,24 @@ object Relation {
         into.lastDay = maxOf(into.lastDay, from.lastDay)
     }
 
-    /** Fold in messages we have not counted before. Order matters: oldest first. */
-    fun observe(s: Stats, fresh: List<Chat.Bubble>, now: Long) {
+    /**
+     * Fold in messages we have not counted before. Order matters: oldest first.
+     *
+     * [live] means they appeared while the chat was being watched, so when they were seen says
+     * something: a new session, who opened it, how long I took. A screen counted in one go when a
+     * chat is opened (see Chat.sync) only adds counts: its first line is not necessarily who
+     * opened, and none of its gaps were observed. [tzOffsetMs] makes "days seen" local days.
+     */
+    fun observe(s: Stats, fresh: List<Chat.Bubble>, now: Long, live: Boolean = true, tzOffsetMs: Long = 0) {
         if (fresh.isEmpty()) return
 
         if (s.firstSeen == 0L) s.firstSeen = now
-        if (now - s.lastSeen > SESSION_GAP_MS) {
+        // Only sessions whose opener was actually seen are counted, so the share stays honest.
+        if (live && now - s.lastSeen > SESSION_GAP_MS) {
             s.sessions++
             if (fresh.first().incoming) s.theyStarted++
         }
-        val day = now / DAY_MS
+        val day = Math.floorDiv(now + tzOffsetMs, DAY_MS)
         if (day != s.lastDay) { s.daysSeen++; s.lastDay = day }
 
         for (b in fresh) {
@@ -65,8 +75,12 @@ object Relation {
                 s.myMsgs++
                 s.myChars += b.text.length
                 if (s.awaitingSince != 0L) {
-                    s.replySamples++
-                    s.replySecTotal += (now - s.awaitingSince) / 1000
+                    // Their message and my answer first seen on the same screen say nothing about
+                    // how long I took; only a wait that started on an earlier screen was observed.
+                    if (live && s.awaitingSince < now) {
+                        s.replySamples++
+                        s.replySecTotal += minOf((now - s.awaitingSince) / 1000, MAX_WAIT_SEC)
+                    }
                     s.awaitingSince = 0L
                 }
             }
@@ -116,7 +130,7 @@ object Relation {
             parts.add(L.t("判断过 ${s.friction + s.calm} 轮，其中 ${s.friction} 轮是高风险", "${s.friction + s.calm} turns judged, ${s.friction} high-risk"))
         }
         if (s.daysSeen >= 2) parts.add(L.t("有 ${s.daysSeen} 天聊过", "chatted on ${s.daysSeen} days"))
-        return parts.joinToString("；")
+        return parts.joinToString(L.t("；", "; "))
     }
 
     fun fmtDuration(sec: Long): String = when {
