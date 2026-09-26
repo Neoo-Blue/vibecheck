@@ -247,7 +247,8 @@ ANDROID_HOME=~/android-sdk ./gradlew --no-daemon testDebugUnitTest assembleDebug
 每次 push 和 pull request，GitHub Actions 都会跑同样的命令并上传 debug APK。
 
 **发版。** 改 `app/build.gradle.kts` 里的 `versionCode` / `versionName`，在 `CHANGELOG.md` 里加上这个版本的一节，
-然后推送标签 `v<versionName>`。Release 工作流会跑测试、编译 `vibecheck-<版本>.apk`，并以那一节为说明发布。
+合并到 `master`：Release 工作流发现这个版本还没发布，就会跑测试、编译 `vibecheck-<版本>.apk`，并以那一节为说明发布。
+推送标签 `v<versionName>` 或手动运行工作流也可以（会替换已有版本的 APK）。
 想用之前版本的签名（这样可以直接覆盖升级），把那个 `debug.keystore` 的 base64 设为仓库 secret `DEBUG_KEYSTORE_BASE64`。
 
 `Chat.kt`、`Jev.kt`、`Person.kt`、`Relation.kt`、`Learner.kt` 不依赖 Android：气泡识别、系统消息过滤、

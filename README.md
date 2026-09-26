@@ -303,10 +303,11 @@ ANDROID_HOME=~/android-sdk ./gradlew --no-daemon testDebugUnitTest assembleDebug
 GitHub Actions runs the same on every push and pull request and uploads the debug APK.
 
 **Releasing.** Bump `versionCode` / `versionName` in `app/build.gradle.kts`, add a section for the
-version to `CHANGELOG.md`, and push the tag `v<versionName>`. The Release workflow runs the tests,
-builds `vibecheck-<version>.apk` and publishes it with that section as the notes. To sign with the
-key of earlier releases, so they update in place, add the base64 of that `debug.keystore` as the
-repository secret `DEBUG_KEYSTORE_BASE64`.
+version to `CHANGELOG.md`, and merge to `master`: the Release workflow sees a version with no release
+yet, runs the tests, builds `vibecheck-<version>.apk` and publishes it with that section as the
+notes. Pushing the tag `v<versionName>` or running the workflow by hand works too (and replaces the
+APK of an existing release). To sign with the key of earlier releases, so they update in place,
+add the base64 of that `debug.keystore` as the repository secret `DEBUG_KEYSTORE_BASE64`.
 
 `Chat.kt`, `Jev.kt`, `Person.kt`, `Relation.kt` and `Learner.kt` do not depend on Android:
 bubble detection, system-row filtering, the two-step question sets, card rendering, bandit
