@@ -1,9 +1,12 @@
 name: Release
 
-# Push a tag like v6.6.0 (it has to match versionName in app/build.gradle.kts), or run this by
-# hand with a tag. It tests, builds the release APK and publishes it as vibecheck-<version>.apk,
-# with the notes from that version's section of CHANGELOG.md. Running it again for an existing
-# release replaces the APK, e.g. after adding the signing key below.
+# Publishes the APK as a GitHub release, vibecheck-<version>.apk, with the notes from that
+# version's section of CHANGELOG.md. Three ways in:
+#   - a push to master whose versionName (app/build.gradle.kts) has no release yet: bump the
+#     version, merge, and the release appears. Pushes of an already released version do nothing;
+#   - pushing a tag like v6.6.0 (it has to match versionName);
+#   - running it by hand with a tag. Running it for an existing release replaces the APK,
+#     e.g. after adding the signing key below.
 #
 # Signing: set the repository secret DEBUG_KEYSTORE_BASE64 to the base64 of the debug.keystore
 # that signed earlier releases (base64 -w0 ~/.android/debug.keystore) and the APK installs over
@@ -11,6 +14,7 @@ name: Release
 
 on:
   push:
+    branches: [master]
     tags: ['v*']
   workflow_dispatch:
     inputs:
@@ -22,34 +26,53 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  group: release
 
 jobs:
   release:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check the tag matches the app version
+      - name: Decide what to publish
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
         run: |
           VERSION=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' app/build.gradle.kts)
+          if [ "$EVENT" = workflow_dispatch ]; then TAG="$INPUT_TAG"
+          elif [ "$REF_TYPE" = tag ]; then TAG="$REF_NAME"
+          else TAG="v$VERSION"
+          fi
           if [ "$TAG" != "v$VERSION" ]; then
             echo "::error::Tag $TAG does not match versionName $VERSION in app/build.gradle.kts"
             exit 1
           fi
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          # A push to master only releases a version that has no release yet.
+          if [ "$EVENT" = push ] && [ "$REF_TYPE" = branch ] && gh release view "$TAG" > /dev/null 2>&1; then
+            echo "$TAG is already released; nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: actions/setup-java@v4
+        if: steps.plan.outputs.skip != 'true'
         with:
           distribution: temurin
           java-version: 17
 
       - uses: gradle/actions/setup-gradle@v4
+        if: steps.plan.outputs.skip != 'true'
 
       - name: Restore the signing key, if there is one
+        if: steps.plan.outputs.skip != 'true'
         env:
           DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
         run: |
@@ -62,11 +85,11 @@ jobs:
           fi
 
       - name: Unit tests and release APK
+        if: steps.plan.outputs.skip != 'true'
         run: ./gradlew --no-daemon testDebugUnitTest assembleRelease
 
       - name: Publish
-        env:
-          GH_TOKEN: ${{ github.token }}
+        if: steps.plan.outputs.skip != 'true'
         run: |
           APK="vibecheck-$VERSION.apk"
           cp app/build/outputs/apk/release/app-release.apk "$APK"
