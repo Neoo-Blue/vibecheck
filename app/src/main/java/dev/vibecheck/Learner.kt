@@ -34,8 +34,18 @@ object Learner {
         val arms: MutableMap<String, Arm> = LinkedHashMap(),
     )
 
-    /** An outstanding prediction, waiting for the next turn to score it. */
-    data class Episode(val situation: String, val intent: String, val action: String, val danger: Double)
+    /**
+     * An outstanding prediction, waiting for the next turn to score it. [danger] is what the card
+     * showed (calibrated); [raw] is the model's own reading, which is what the next turn's raw
+     * reading has to be compared with.
+     */
+    data class Episode(
+        val situation: String,
+        val intent: String,
+        val action: String,
+        val danger: Double,
+        val raw: Double = danger,
+    )
 
     /**
      * Three keys per episode, most specific first. Context that has enough history wins; a
@@ -47,9 +57,14 @@ object Learner {
         // would be credited twice for one episode, inflating both its count and its confidence.
         listOf("$situation|$intent|$action", "*|$intent|$action", "*|*|$action").distinct()
 
-    /** danger arrives normalized to 0..1 so levels can change without invalidating history. */
+    /**
+     * danger arrives normalized to 0..1 so levels can change without invalidating history.
+     * [nextDanger] is the raw reading of the next turn.
+     */
     fun observe(m: Model, e: Episode, nextDanger: Double): Double {
-        val reward = e.danger - nextDanger          // positive = it calmed down
+        // Raw against raw: comparing the calibrated number with a raw one credited or blamed
+        // every arm by the person's own bias, whatever the conversation actually did.
+        val reward = e.raw - nextDanger             // positive = it calmed down
         for (key in keys(e.situation, e.intent, e.action)) {
             val prev = m.arms[key] ?: Arm(0, 0.0)
             val n = prev.n + 1
@@ -123,8 +138,11 @@ object Learner {
     fun summary(m: Model): List<String> {
         val top = m.arms.entries.filter { it.value.n >= MIN_N }.sortedByDescending { it.value.mean }.take(5)
         return listOf(L.t("更新 ${m.updates} 次，危险偏置 ${"%+.2f".format(m.dangerBias)}", "${m.updates} updates, danger bias ${"%+.2f".format(m.dangerBias)}")) +
-            top.map { "${it.key}  n=${it.value.n}  r=${"%+.2f".format(it.value.mean)}" }
+            top.map { "${armLabel(it.key)}  n=${it.value.n}  r=${"%+.2f".format(it.value.mean)}" }
     }
+
+    /** "朋友|*|先道歉" in the display language: the stored key itself never changes. */
+    fun armLabel(key: String): String = key.split('|').joinToString("|") { if (it == "*") it else L.label(it) }
 
     fun isTrained(m: Model) = m.updates >= MIN_N || abs(m.dangerBias) > 0.02
 }

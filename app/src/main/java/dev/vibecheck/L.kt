@@ -64,5 +64,11 @@ object L {
         "从话题转到约见或下一步" to "move toward meeting up",
         // routine fallbacks
         "闲聊" to "small talk",
+        // score levels (Jev.LEVELS)
+        "很轻松" to "chill", "安全" to "safe", "要用心" to "needs care", "有分歧" to "tense",
+        "很危险" to "risky", "正在爆发" to "blowing up",
+        "不急" to "no rush", "这周内" to "this week", "今天" to "today", "现在" to "right now",
+        "冷淡" to "cold", "一般" to "lukewarm", "有兴趣" to "interested", "很热" to "keen",
+        "低落" to "low", "平淡" to "flat", "不错" to "good", "很开心" to "great",
     )
 }

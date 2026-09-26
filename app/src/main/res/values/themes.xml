@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Follows the phone's dark mode (values-night). No action bar: the dashboard draws its own header. -->
+    <style name="AppTheme" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:colorPrimary">#2E6F63</item>
+        <item name="android:colorAccent">#2E6F63</item>
+        <item name="android:windowBackground">@color/dash_bg</item>
+        <item name="android:statusBarColor">@color/dash_bg</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>

@@ -99,19 +99,50 @@ object Person {
         var apologies: Int = 0,
     )
 
-    private val APOLOGY = listOf("对不起", "抱歉", "不好意思", "我错了", "sorry")
+    private val APOLOGY = listOf(
+        "对不起", "抱歉", "不好意思", "我错了", "对不住", "原谅我",
+        "sorry", "sry", "my bad", "apologi", "forgive me",
+    )
+
+    /**
+     * WeChat and QQ send their built-in faces as text codes: [微笑], [捂脸], [Smile]. Only the real
+     * codes count: "[图片]", "[链接]" and "[Photo]" are placeholders, not a way of writing.
+     */
+    private val TEXT_FACE_CODES: Set<String> = (
+        "微笑 撇嘴 色 发呆 得意 流泪 害羞 闭嘴 睡 大哭 尴尬 发怒 调皮 呲牙 惊讶 难过 囧 抓狂 吐 偷笑 愉快 白眼 " +
+            "傲慢 困 惊恐 憨笑 悠闲 咒骂 疑问 嘘 晕 衰 骷髅 敲打 再见 擦汗 抠鼻 鼓掌 坏笑 左哼哼 右哼哼 哈欠 鄙视 " +
+            "委屈 快哭了 阴险 亲亲 可怜 笑脸 生病 脸红 破涕为笑 恐惧 失望 无语 嘿哈 捂脸 奸笑 机智 皱眉 耶 吃瓜 加油 " +
+            "汗 天啊 社会社会 旺柴 好的 打脸 哇 翻白眼 666 让我看看 叹气 苦涩 裂开 嘴唇 爱心 心碎 拥抱 强 弱 握手 " +
+            "胜利 抱拳 勾引 拳头 合十 啤酒 咖啡 蛋糕 玫瑰 凋谢 菜刀 炸弹 便便 月亮 太阳 庆祝 礼物 红包 發 福 烟花 " +
+            "爆竹 猪头 跳跳 发抖 转圈 流汗 奋斗 饥饿 酷 冷汗 疯了 糗大了 吓 爱你 飞吻 差劲 " +
+            "Smile Grimace Drool Scowl CoolGuy Sob Shy Silent Sleep Cry Awkward Angry Tongue Grin Surprise Frown " +
+            "Ruthless Blush Scream Puke Chuckle Joyful Slight Smug Hungry Drowsy Panic Sweat Laugh Commando Determined " +
+            "Scold Shocked Shhh Dizzy Tormented Toasted Skull Hammer Wave Speechless NosePick Clap Shame Trick Yawn " +
+            "Pooh-pooh Shrunken TearingUp Sly Kiss Wrath Whimper Cleaver Beer Coffee Pig Rose Wilt Lips Heart " +
+            "BrokenHeart Cake Bomb Poop Moon Sun Gift Hug ThumbsUp ThumbsDown Shake Peace Fight Beckon Fist OK " +
+            "InLove Blowkiss Tremble Twirl Hey Facepalm Smirk Smart Concerned Yeah! Onlooker GoForIt Sweats OMG Emm " +
+            "Respect Doge NoProb MyBad Wow Boring Awesome LetMeSee Sigh Hurt Broken Party Firecracker Fireworks"
+        ).split(' ').filter { it.isNotEmpty() }.toSet()
+
+    private val BRACKETED = Regex("""\[([^\[\]\s]{1,10})]""")
 
     /** Feed it only my own outgoing messages. */
     fun observe(s: Style, text: String) {
         s.msgs++
         s.chars += text.length
-        s.emoji += text.codePoints().filter { isEmoji(it) }.count().toInt()
+        // Messages that carry an emoji, not emoji characters: "带表情 x%" is a share of messages.
+        if (hasEmoji(text)) s.emoji++
         if (text.contains('？') || text.contains('?')) s.questions++
         if (APOLOGY.any { text.contains(it, ignoreCase = true) }) s.apologies++
     }
 
+    fun hasEmoji(text: String): Boolean =
+        text.codePoints().anyMatch { isEmoji(it) } ||
+            BRACKETED.findAll(text).any { it.groupValues[1] in TEXT_FACE_CODES }
+
     private fun isEmoji(cp: Int): Boolean =
-        cp in 0x1F300..0x1FAFF || cp in 0x2600..0x27BF || cp in 0x1F000..0x1F2FF
+        cp in 0x1F300..0x1FAFF || cp in 0x2600..0x27BF || cp in 0x1F000..0x1F2FF ||
+            cp in 0x2B50..0x2B55 || cp in 0x23E9..0x23FA || cp in 0x231A..0x231B
 
     fun styleSummary(s: Style): String? {
         if (s.msgs < 3) return null
@@ -162,4 +193,15 @@ object Person {
         }
         .toList()
         .takeLast(HISTORY)
+
+    // ---- the newest lines already counted (see Chat.sync) ----
+
+    fun saveTail(tail: List<Pair<String, String>>): String =
+        tail.joinToString("\n") { (who, text) -> "$who\t${text.replace('\n', ' ').replace('\t', ' ')}" }
+
+    fun loadTail(text: String): List<Pair<String, String>> = text.lineSequence()
+        .filter { it.isNotBlank() }
+        .mapNotNull { l -> l.split('\t', limit = 2).takeIf { it.size == 2 }?.let { it[0] to it[1] } }
+        .toList()
+        .takeLast(Chat.TAIL)
 }

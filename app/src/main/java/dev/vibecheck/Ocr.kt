@@ -6,8 +6,10 @@ import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
 
 /**
- * On-device Chinese text recognition. The model is bundled in the APK, so no image and no text
- * ever leaves the phone for OCR, and it works with no network at all.
+ * On-device Chinese text recognition (it reads Latin script too). Recognition runs on the phone,
+ * so no image and no text leaves it for OCR. The model is delivered by Google Play services
+ * rather than bundled, which keeps the APK small but means a phone without Play services cannot
+ * run it: the failure then shows under Tools → Diagnostics.
  */
 object Ocr {
 
@@ -29,7 +31,8 @@ object Ocr {
                 onResult(items)
             }
             .addOnFailureListener {
-                Diag.lastError = "ocr: ${it.message}"
+                // Usually the model is still downloading, or Play services is missing altogether.
+                Diag.lastError = "ocr: ${it.message} (needs Google Play services and its OCR model)"
                 Diag.log(Diag.lastError)
                 onResult(emptyList())
             }

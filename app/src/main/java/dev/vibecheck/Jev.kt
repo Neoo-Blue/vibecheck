@@ -34,6 +34,26 @@ object Jev {
     fun pct(p: Double): String = "${Math.round(p * 100)}%"
 
     /**
+     * Short names for each level of the score questions, lowest first. A bare "2 / 4" under
+     * "their mood" said nothing about which end is good. Chinese keys, like every option.
+     */
+    val LEVELS: Map<String, List<String>> = mapOf(
+        "danger" to listOf("很轻松", "安全", "要用心", "有分歧", "很危险", "正在爆发"),
+        "pressure" to listOf("不急", "这周内", "今天", "现在"),
+        "interest" to listOf("冷淡", "一般", "有兴趣", "很热"),
+        "mood" to listOf("低落", "平淡", "不错", "很开心"),
+    )
+
+    /** 1-based level as shown on the card. */
+    fun shownLevel(a: Answer.Scored): Int = (Math.round(a.score).toInt() + 1).coerceIn(1, a.levels.coerceAtLeast(1))
+
+    /** The level's short name (an untranslated key), or null for a question without names. */
+    fun levelName(id: String, a: Answer.Scored): String? {
+        val names = LEVELS[id]?.takeIf { it.size == a.levels } ?: return null
+        return names[shownLevel(a) - 1]
+    }
+
+    /**
      * The full card. With a situation, the headers are that situation's own question set on top
      * of the shared intent and risk, so a work chat and a first chat with a stranger no longer
      * show the same five blocks.
@@ -103,8 +123,8 @@ object Jev {
                     blocks.add(Block(L.label(header), lines))
                 }
                 is Answer.Scored -> {
-                    val shown = Math.round(a.score).toInt() + 1   // levels are 0-based
-                    blocks.add(Block(L.label(header), listOf("$shown / ${a.levels}")))
+                    val name = levelName(id, a)?.let { " · ${L.label(it)}" } ?: ""
+                    blocks.add(Block(L.label(header), listOf("${shownLevel(a)} / ${a.levels}$name")))
                 }
             }
         }
@@ -124,7 +144,7 @@ object Jev {
         return when {
             level >= 0.6 && action != null -> L.t(
                 "提醒\n风险偏高，$action" + (need?.let { "，先满足「$it」" } ?: "") + "。",
-                "Heads up\nRisk is high: ${L.label(action)}" + (need?.let { ", and give them ${L.label(it)} first" } ?: "") + ".")
+                "Heads up\nThis could go wrong. Best move: ${L.label(action)}" + (need?.let { "; they need ${L.label(it)}" } ?: "") + ".")
             level <= 0.2 && action != null -> L.t("很轻松，$action 就好，别想多。", "Easy one: ${L.label(action)}, don't overthink it.")
             urgent < 0.3 && level < 0.5 -> L.t("不急，晚点回也没关系。", "No rush, replying later is fine.")
             else -> null

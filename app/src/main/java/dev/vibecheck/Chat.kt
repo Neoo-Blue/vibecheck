@@ -45,25 +45,51 @@ object Chat {
     /** Timestamps look like messages to OCR: they are short, boxed, and sit in the list. */
     fun isTimeOrDate(text: String): Boolean = TIME_OR_DATE.matches(text.trim())
 
-    private val NOTIFICATION = Regex(
+    /** System rows specific enough to recognise anywhere in a text. */
+    private val SYSTEM_PHRASE = Regex(
         """(sent you \d+ message|friend\(s\) sent you|\d+\s*friend\(s\)|""" +
             """向你推荐|拍了拍|撤回了一条消息|邀请你加入|加入了群聊|通过了你的|Duration:\s*\d|""" +
-            // Call stubs, reactions and system rows the other apps put inside the list.
-            """Missed (voice|video|audio) call|(Voice|Video|Audio) call( ended)?|Call ended|""" +
-            """reacted .{1,4} to|You reacted|unsent a message|message was deleted|deleted this message|""" +
-            """You replied to|replied to you|Replied to|sent an attachment|changed the (theme|group)|""" +
-            """joined the (chat|group|server)|left the (chat|group|conversation)|now connected on Messenger|waved at|""" +
-            """end-to-end encrypted|Message not delivered|Say hi|Send a message|""" +
-            """(Seen|Liked|Loved) by |^(Liked|Loved|Laughed at|Emphasized|Questioned|Disliked) ["“]|""" +
-            """pinned a message|hopped into|started a (call|huddle)|Huddle ended|took a screenshot|""" +
-            """Security code changed|Safety number changed|disappearing message|Letter Sealing|Secret chat|""" +
-            """set to delete|accepted the request|(Outgoing|Incoming|Missed) Call|""" +
-            """님이 (나갔|들어왔)습니다|삭제된 메시지|通话时长|语音通话|视频通话)""",
+            """reacted .{1,4} to|unsent a message|message was deleted|deleted this message|""" +
+            """now connected on Messenger|end-to-end encrypted[^?？]*$|""" +
+            """security code (with .{1,40} )?changed|safety number (with .{1,40} )?(has )?changed|""" +
+            """disappearing messages? (were |was |are )?turned (on|off)|turned (on|off) disappearing messages?|""" +
+            """Letter Sealing|secret chat (created|started)|joined the secret chat|set to (delete|disappear) after|""" +
+            """님이 (나갔|들어왔)습니다|삭제된 메시지|通话时长)""",
         RegexOption.IGNORE_CASE,
     )
 
-    /** WeChat toasts, call-duration stubs and system notices are not conversation. */
-    fun isNotification(text: String): Boolean = NOTIFICATION.containsMatchIn(text)
+    /** Who a system row is about: "You", or a capitalised name of one or two words. Never "I": apps say "You". */
+    private const val ACTOR = """(you|(?-i:(?!I\b)\p{Lu}[\p{L}\p{N}'._-]{0,19}( \p{Lu}[\p{L}\p{N}'._-]{0,19})?))"""
+    private const val CLOCK = """\d{1,2}:\d{2}(\s?[AaPp]\.?[Mm]\.?)?"""
+
+    /**
+     * System rows built from ordinary words ("Video call", "Sam replied to you"). These only count
+     * when they are the whole text, optionally followed by metadata ("· 12 min", "at 10:32"), and
+     * never when they end in a question: "video call tonight?", "Video call at 8 tonight",
+     * "she finally replied to you" and "say hi to your mom for me" are messages.
+     */
+    private val SYSTEM_ROW = Regex(
+        """(((missed|cancell?ed|declined|outgoing|incoming) (voice |video |audio )?call|(voice|video|audio) call)( ended| back)?|""" +
+            """call ended|huddle ended|(语音|视频)通话(已取消|已拒绝|未接听|对方已取消|对方已拒绝|对方无应答|已挂断)?|""" +
+            """message not delivered|(send|type|write) a message(…|\.\.\.)?|say hi( to $ACTOR)?|""" +
+            """(seen|liked|loved) by $ACTOR( and \d+ others?)?|(liked|loved|laughed at|emphasized|questioned|disliked) ["“].*|""" +
+            """you replied to ($ACTOR|their story|your story)|$ACTOR replied to (you|your story)|replied to (you|yourself|$ACTOR)|""" +
+            """$ACTOR sent an attachment|$ACTOR changed the (theme|group|chat|emoji|nickname)[^?？]{0,60}|""" +
+            """$ACTOR (joined|left) the (chat|group|server|conversation|call)|$ACTOR waved at $ACTOR|""" +
+            """$ACTOR pinned a message|$ACTOR started a (video |voice )?(call|huddle)|""" +
+            """$ACTOR took a screenshot( of (the|this) (chat|conversation))?|""" +
+            """$ACTOR reacted to (your|their|a|an|his|her|this) (message|story|photo|video|note|comment|post)|""" +
+            """$ACTOR accepted (the|your) (message )?request)""" +
+            // Trailing metadata only: "· 12 min", " at 10:32", " 03:12". Not ", then dinner" or " at 8 tonight".
+            """(\s*[·•|]\s*[^?？]{0,40}|\s+(at|on)\s+$CLOCK|\s+$CLOCK)?[.!。]?""",
+        RegexOption.IGNORE_CASE,
+    )
+
+    /** WeChat toasts, call stubs, reactions and system notices are not conversation. */
+    fun isNotification(text: String): Boolean {
+        val t = text.trim()
+        return SYSTEM_PHRASE.containsMatchIn(t) || SYSTEM_ROW.matches(t)
+    }
 
     fun isChrome(box: Box, text: String, win: Box): Boolean {
         if (text.isBlank() || text.length > 400) return true
@@ -117,9 +143,13 @@ object Chat {
      * Am I looking at a conversation, or at the chat list? The list is all left-aligned rows of
      * names and previews, so requiring at least one message of my own keeps the tool from
      * judging a directory of contacts as if it were a conversation.
+     *
+     * [hasInput] is a text field along the bottom of the window, which a chat has and a chat list
+     * does not. With it, a screen holding only their messages still counts: a new contact's first
+     * message, or a long run of theirs, is exactly when a read is wanted.
      */
-    fun inConversation(bubbles: List<Bubble>): Boolean =
-        bubbles.any { !it.incoming } && bubbles.size >= 2
+    fun inConversation(bubbles: List<Bubble>, hasInput: Boolean = false): Boolean =
+        (bubbles.any { !it.incoming } && bubbles.size >= 2) || (hasInput && bubbles.isNotEmpty())
 
     private val TAB_LABELS = setOf(
         "WeChat", "Contacts", "Discover", "Me", "微信", "通讯录", "发现", "我",
@@ -143,7 +173,6 @@ object Chat {
         return tabs >= 2
     }
 
-    /** Fires only when the newest visible message is theirs and we have not judged it yet. */
     /**
      * WeChat message bubbles are long-clickable (copy/recall menu); nicknames, timestamps and
      * system rows are not. When the tree gives us that signal, trust it over geometry alone.
@@ -153,6 +182,7 @@ object Chat {
         return if (strong.size >= 2) strong else bubbles
     }
 
+    /** Fires only when the newest visible message is theirs and we have not judged it yet. */
     fun triggerKey(bubbles: List<Bubble>): String? {
         val last = bubbles.lastOrNull() ?: return null
         if (!last.incoming) return null
@@ -202,5 +232,124 @@ object Chat {
         val head = kept.take(page.size * 2)
         val known = page.count { it in head }
         return if (known * 2 > page.size) page.filterNot { it in head } else page
+    }
+
+    // ---- counting each message once while watching ----
+
+    /** How many of the newest counted messages are remembered per person to line screens up against. */
+    const val TAIL = 40
+
+    /** What one observed screen adds: the lines new at the bottom, and the tail to remember next. */
+    data class Sync(val fresh: List<Pair<String, String>>, val tail: List<Pair<String, String>>, val aligned: Boolean)
+
+    /**
+     * Lines the visible page up against the newest messages already counted for this person and
+     * returns what is genuinely new below them. Remembering only "the last text seen" counted every
+     * screen of history again as you scrolled up (the last text was off screen, so everything
+     * looked new), and the way back down counted it all a third time.
+     *
+     * - The tail's newest message is on screen: whatever sits below it is new.
+     * - The page lines up with older parts of the tail: scrolled up, nothing new.
+     * - Nothing lines up: somewhere in the history we never counted, so nothing is counted, unless
+     *   the chat was just opened ([reentry]), where the app shows the newest messages and no
+     *   overlap means everything on screen arrived while we were away.
+     *
+     * [legacyLast] is the single "last seen text" older versions stored, used once to migrate.
+     */
+    fun sync(
+        tail: List<Pair<String, String>>,
+        page: List<Pair<String, String>>,
+        reentry: Boolean,
+        legacyLast: String = "",
+        keep: Int = TAIL,
+    ): Sync {
+        if (page.isEmpty()) return Sync(emptyList(), tail, false)
+        if (tail.isEmpty()) {
+            if (legacyLast.isEmpty()) return Sync(page, page.takeLast(keep), false)
+            val at = page.indexOfLast { it.second == legacyLast }
+            return Sync(if (at >= 0) page.drop(at + 1) else emptyList(), page.takeLast(keep), at >= 0)
+        }
+        val end = alignEnd(tail, page)
+        return when {
+            end == null -> if (reentry) Sync(page, page.takeLast(keep), false) else Sync(emptyList(), tail, false)
+            end >= page.size -> Sync(emptyList(), tail, true)
+            else -> page.drop(end + 1).let { fresh -> Sync(fresh, (tail + fresh).takeLast(keep), true) }
+        }
+    }
+
+    /**
+     * The page index of the tail's newest line under the best-agreeing offset between the two
+     * (page.size or more when the page shows only older, already counted lines), or null when
+     * nothing lines up convincingly. An offset needs at least two agreeing lines and 60% of its
+     * overlap agreeing, so one clipped or misread bubble does not break it and a lone "ok" that
+     * happens to match does not make it.
+     *
+     * Known limit: if a burst pushes every known line off a short page, nothing lines up until
+     * the chat is opened again. That undercounts; guessing instead would count history as new.
+     */
+    fun alignEnd(tail: List<Pair<String, String>>, page: List<Pair<String, String>>): Int? {
+        // Normalised once per line rather than once per comparison: this runs on every scan.
+        val t = tail.map { it.first to norm(it.second) }
+        val p = page.map { it.first to norm(it.second) }
+        var bestEnd: Int? = null
+        var bestHits = 0
+        val last = tail.size - 1
+        for (d in -(page.size - 1)..last) {          // page[i] lines up with tail[i + d]
+            val from = maxOf(0, -d)
+            val to = minOf(page.size, tail.size - d)
+            val n = to - from
+            if (n <= 0) continue
+            var hits = 0
+            for (i in from until to) if (p[i].first == t[i + d].first && close(p[i].second, t[i + d].second)) hits++
+            // A single line lines up when there is nothing more to go on, or when it is the tail's
+            // newest line sitting at the very top of the page and distinctive enough not to be a
+            // coincidence: with the keyboard up only a few bubbles show, and a quick burst can push
+            // all but one known line off the screen.
+            val enough = if (n == 1) hits == 1 && (tail.size == 1 || page.size == 1 || (d == last && t[last].second.length >= 6))
+                else hits >= 2 && hits * 10 >= n * 6
+            if (!enough) continue
+            val end = last - d
+            // Ties go to the later end: fewer lines called new, which is the safe mistake.
+            if (hits > bestHits || (hits == bestHits && end > (bestEnd ?: -1))) {
+                bestHits = hits
+                bestEnd = end
+            }
+        }
+        return bestEnd
+    }
+
+    fun same(a: Pair<String, String>, b: Pair<String, String>): Boolean =
+        a.first == b.first && similar(a.second, b.second)
+
+    /**
+     * Equal, or equal up to the odd character OCR reads differently between two frames: one
+     * edit per five characters. Under five characters it must be exact, or 好的 and 好吧 would
+     * be one message.
+     */
+    fun similar(a: String, b: String): Boolean = a == b || close(norm(a), norm(b))
+
+    private fun norm(s: String): String = s.filterNot { it.isWhitespace() }.lowercase()
+
+    /** [similar] for already normalised text. Long texts compare their first 80 characters. */
+    private fun close(x: String, y: String): Boolean {
+        if (x == y) return true
+        if (abs(x.length - y.length) > minOf(x.length, y.length) / 5) return false
+        val xs = x.take(80)
+        val ys = y.take(80)
+        val slack = minOf(xs.length, ys.length) / 5
+        return slack > 0 && editDistance(xs, ys) <= slack
+    }
+
+    private fun editDistance(a: String, b: String): Int {
+        var prev = IntArray(b.length + 1) { it }
+        var cur = IntArray(b.length + 1)
+        for (i in 1..a.length) {
+            cur[0] = i
+            for (j in 1..b.length) {
+                cur[j] = minOf(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + if (a[i - 1] == b[j - 1]) 0 else 1)
+            }
+            val t = prev; prev = cur; cur = t
+        }
+        return prev[b.length]
     }
 }
