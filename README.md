@@ -13,7 +13,7 @@ LINE, KakaoTalk, plus any chat app whose layout puts them on the left and you on
 (enter the package name). Discord and Slack put every message on the left, so the geometry
 cannot tell you apart; they are left out.
 
-The in-app UI is bilingual (English and Chinese); it follows the phone's language and can be switched at the top of the settings screen.
+The in-app UI is bilingual (English and Chinese); it follows the phone's language and can be switched at the top of the app.
 
 ## Judging happens in two steps
 
@@ -49,16 +49,40 @@ the per-person learning is stored under; Jev reads English chats just as well.
 ## Install
 
 1. Build it yourself (see Development) and copy `app/build/outputs/apk/debug/app-debug.apk`
-   to the phone, or grab the APK from the latest release.
-2. Open the app, paste a TypeSafe API key and tap "Test judging engine" to confirm it works. For
-   deep analysis, reply drafts and "learn this person", add an OpenRouter key. Save.
+   to the phone, grab the APK from the latest release, or download the `vibecheck-debug-apk`
+   artifact of the latest successful "Build" run on GitHub Actions.
+2. Open the app. On the **Setup** tab, paste a TypeSafe API key and tap **Test** to confirm it
+   works. For deep analysis, reply drafts and "learn this person", add an OpenRouter key.
+   Everything saves by itself.
    **No TypeSafe key?** Jev is also served by OpenRouter: pick "Jev via OpenRouter" under
    Judging engine and one OpenRouter key covers everything. TypeSafe's own API is the default.
-3. Tap "Open accessibility settings" and enable **Vibecheck**.
-   **Toggle greyed out?** Android 13+ restricts sideloaded apps. Settings → Apps → Vibecheck →
+3. The **Get started** checklist at the top says what is still missing. Tap **Open accessibility
+   settings** and enable **Vibecheck**.
+   **Toggle greyed out?** Android 13+ restricts sideloaded apps. Tap **App info** in the checklist →
    menu (⋮) → Allow restricted settings → confirm your lock screen, then enable it.
 4. Open a chat. A small bubble appears at the right edge; about half a second after a
    message arrives it takes on a colour. Tap it for the card.
+
+**Updating from 6.5 or earlier:** if "Learn" does not scroll after the update, switch the
+accessibility service off and on once, so Android picks up its new gesture permission.
+
+## The app: Setup and Tools
+
+The app has two tabs, and everything saves as you go:
+
+- **Setup** holds only what it takes to get going: the checklist, the judging engine and keys,
+  which apps to watch, a few behaviour switches (judging on, automatic deep reads, OCR, learning,
+  remembering people) and the general relationship context.
+- **Tools** holds everything else, one simple tile each: **Pause** (1 hour, or until 8 am),
+  **People** (see and edit what was learned per person, pause a person, merge, forget, clean up
+  near-empty records), **Card** (text size, which buttons the card shows, buzz on high risk,
+  bubble position), **Usage** (paid calls today and in total), **Backup** (export / import people
+  memory as a file; keys are not included), **Models**, **Keep it running** (battery optimisation
+  and app info shortcuts), **Diagnostics** (live status, debug mode, the LAN endpoint) and
+  **How it works**.
+
+Every tile has a **Hide** button. Hidden tiles collect at the bottom of the Tools tab, where one
+tap brings a tile back (or **Show all**), so the dashboard only shows what you use.
 
 No "draw over other apps" permission is needed: the card is a `TYPE_ACCESSIBILITY_OVERLAY`,
 which an accessibility service owns outright. It is a trusted window, so `setHideOverlayWindows()`
@@ -103,20 +127,38 @@ can score opposite ways in different situations, and nothing is shared between p
 
 **At rest there is only the bubble.** Judging still runs on every new message; the result shows
 on the bubble as the danger number and a colour (green → yellow → red). Tap to open, ✕ to
-collapse. The card is a trusted window, so tapping it does not block the chat underneath, and
-taps outside it go straight through.
+collapse. **Drag** the bubble to move it (it snaps to the nearest edge and remembers the spot);
+**long-press** it for the menu. The card is a trusted window, so tapping it does not block the
+chat underneath, and taps outside it go straight through. It follows the phone's dark mode and
+stays above the keyboard.
+
+The header names who the card is about and the kind of chat, so a misread contact is obvious.
+Score answers carry their meaning ("3 / 4 · today", "5 / 6 · risky"), not just a number.
 
 | button | what it does |
 |---|---|
 | More / Less | expand shows "what kind of chat" and "answer now?" and lays out the deep analysis in full |
 | Think | one deep pass through DeepSeek on OpenRouter: what they care about, the trap in this step, a concrete next move |
-| Reply | three reply drafts in **your own way of speaking**; tap one to copy, long-press the input box to paste |
+| Reply | three reply drafts in **your own way of speaking**; tap one to put it into the (empty) reply box, long-press to copy. Nothing is ever sent for you |
 | Learn | read this person's whole history and write a profile (see "Learn this person") |
+| ⋯ | re-check this screen, pause 1 hour, pause this chat, settings |
 | ✕ | back to the bubble |
+
+Think, Reply, Learn and ⋯ can each be switched off under Tools → Card. The deep read and the
+reply drafts are separate panels, so an automatic deep read landing later does not wipe the
+drafts you were choosing from. Long-press any line on the card to copy it.
 
 Think and Reply only run when you press them (roughly $0.0002 to $0.001 each). Every new message
 runs Jev alone: a few hundred milliseconds, cheap. Turns that deserve it also get an automatic
-deep pass; the bubble shows ✦ when there is something to read.
+deep pass while you are still in that chat; the bubble shows ✦ when there is something to read.
+
+Each chat keeps its own card: switch to another chat and back, and the last judgment is still
+there without asking again. A failed call (no connection, a rejected key) is shown on the card and
+retried with backoff; a rejected key is not retried until you change the key.
+
+**Pausing.** ⋯ → Pause 1 hour (or Tools → Pause) stops judging everywhere and resumes by itself.
+⋯ → Pause this chat stops judging *and* recording for one person until you resume it from the
+card or from Tools → People. The bubble shows ⏸ while paused.
 
 **On WeChat the deep pass also takes a screenshot** and uses a vision model (default
 `deepseek/deepseek-v4-flash-vision-exp`), because OCR cannot read stickers and emoji and those
@@ -143,8 +185,11 @@ What it accumulates (all local; raw text is never uploaded for this):
 | days seen | distinct dates |
 
 These enter every judgment as "long-term observations of this relationship" and the deep
-prompt too. Each message is counted once (the last seen one is remembered), so sitting on the
-same screen does not inflate the numbers.
+prompt too. Each message is counted once: every screen is lined up against the newest messages
+already counted for that person (tolerating the odd OCR misread), so sitting on the same screen,
+or scrolling up through history and back down, does not inflate the numbers. Timing (who opened,
+how long I took) is only taken from messages that arrived while the chat was being watched.
+Switch this off under Setup → "Remember people while you chat"; a paused chat is never recorded.
 
 ## Per-person memory (all on the phone)
 
@@ -161,9 +206,10 @@ and stores everything under "app package + name":
 | profile | 4 to 6 lines written by DeepSeek after "learn this person" | `relationship context` when no note is set |
 
 The same sentence means different things from different people, so nothing is shared between
-two people: "apologize first" working on A does not touch B's ranking. The bottom of the
-settings screen shows what has been learned about each person, lets you edit their note, or
-forget them.
+two people: "apologize first" working on A does not touch B's ranking. Tools → People shows what
+has been learned about each person (with search), lets you edit their note, pause them, merge
+them with the same person on another app, or forget them. Tools → Backup exports all of it to a
+file for a new phone.
 
 Statistics stay local, but their summary (e.g. "avg 12 chars, apologises 8%") goes with each
 judgment request. Nothing is uploaded beyond the dozen messages currently on screen, and no
@@ -175,21 +221,22 @@ Open the card in a chat and tap Learn. The card drops to the bubble, which shows
 count, and the app pages up through the history by itself. Each page's new lines are joined
 onto the front, aligned by the overlap between pages rather than by de-duplicating text, so
 "ok" sent thirty times stays thirty messages. It stops after four pages without new content or
-at 60 pages. The full read then replaces message counts and speaking style, and DeepSeek writes
-the profile. Switching app or page, or an interrupted service, cancels the read; a read that
-covers fewer messages than the live count does not overwrite the statistics.
+at 60 pages; tap the bubble to stop early and keep what was read. The full read then replaces
+message counts and speaking style, and DeepSeek writes the profile. Switching app or page, or an
+interrupted service, cancels the read; a read that covers fewer messages than the live count does
+not overwrite the statistics.
 
 ### One person across apps
 
-When Li on WeChat and Sam on Messenger are the same person, pick one in settings, tap
+When Li on WeChat and Sam on Messenger are the same person, open Tools → People → Li → More… →
 "Merge with another person", and choose the other. Counts, speaking style, recent turns, profile and bandit
 are folded together (arms pool their samples, the danger bias is weighted by how much each side
 learned), and from then on either chat opens the same memory.
 
 ## Debugging while it runs
 
-Enable "LAN debug endpoint" in settings and any computer on the same Wi-Fi can read the live state,
-no adb and no restart:
+Enable "LAN debug endpoint" under Tools → Diagnostics and any computer on the same Wi-Fi can read
+the live state, no adb and no restart:
 
 ```
 curl "http://<phone-ip>:8848/status?t=<token>"
@@ -206,9 +253,10 @@ curl "http://<phone-ip>:8848/status?t=<token>"
 | `/rescan` | force a fresh judgment of the current message |
 | `/windows` · `/shot` | current window list · whether screenshots work (for the OCR path) |
 
-The token is generated in the app, every route needs it, and it can be rotated at any time.
-The endpoint is off by default and only starts once a watched app is opened.
-**`/tree` and `/last` return chat content verbatim**; switch it off when you are done.
+The token is generated in the app, every route needs it, and "New token" locks the old URL out
+immediately. Only callers on the local network (private, link-local or unique-local addresses) are
+answered, even if the phone has a public IPv6 address on mobile data. The endpoint is off by
+default. **`/tree` and `/last` return chat content verbatim**; switch it off when you are done.
 
 `/tree` is how you answer "is WeChat scrambling the node tree on this version": compare it
 with what is actually on screen.
@@ -220,6 +268,10 @@ with what is actually on screen.
   are lost on that path, which is why the deep pass attaches a screenshot.
 - **Telegram draws its bubbles on a canvas**: there is no text in the node tree, so it reads
   through OCR like WeChat.
+- OCR uses Google Play services' on-device text recognition, which downloads its model on first
+  use. Phones without Play services (many phones sold in China) cannot run the OCR path; the error
+  shows under Tools → Diagnostics. On Android 14+ the capture is of the chat's own window, so an
+  open card or the keyboard never hides messages from OCR.
 - Soul has no documented view structure; classification is the same geometry rule (hugging
   the left = them, hugging the right = me) and may need adjusting on a new version. The same
   goes for the other apps; the status labels they print inside the list (Seen, Delivered,
@@ -230,7 +282,7 @@ with what is actually on screen.
 - Only **messages visible on screen**, at most the last 12; no database, no history, except
   during an explicit "learn this person" read.
 - Chinese ROMs (MIUI / ColorOS / HarmonyOS) kill background accessibility services; exclude the
-  app from battery optimisation.
+  app from battery optimisation (Tools → Keep it running).
 
 ## Privacy
 
@@ -241,12 +293,16 @@ public Wi-Fi. This is a personal tool for your own phone and your own conversati
 
 ## Development
 
-Needs JDK 17, an Android SDK with API 35, and Gradle 8.x:
+Needs JDK 17 and an Android SDK with API 35. The Gradle wrapper pins Gradle 8.9 (checksum
+verified):
 
 ```bash
-ANDROID_HOME=~/android-sdk gradle --no-daemon testDebugUnitTest assembleDebug
+ANDROID_HOME=~/android-sdk ./gradlew --no-daemon testDebugUnitTest assembleDebug
 ```
 
+GitHub Actions runs the same on every push and pull request and uploads the debug APK.
+
 `Chat.kt`, `Jev.kt`, `Person.kt`, `Relation.kt` and `Learner.kt` do not depend on Android:
-bubble detection, the two-step question sets, card rendering, bandit updates and merging, and
-page alignment for the history read are covered by the unit tests under `app/src/test/`.
+bubble detection, system-row filtering, the two-step question sets, card rendering, bandit
+updates and merging, page alignment for the history read, and the alignment that keeps passive
+counting from double counting are covered by the unit tests under `app/src/test/`.

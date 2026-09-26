@@ -11,8 +11,8 @@ android {
         applicationId = "dev.vibecheck"
         minSdk = 26
         targetSdk = 35
-        versionCode = 42
-        versionName = "6.5.1"
+        versionCode = 43
+        versionName = "6.6.0"
     }
 
     buildTypes {
