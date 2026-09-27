@@ -103,6 +103,21 @@ class MainActivity : Activity() {
         setContentView(root)
         loaded = true
         selectTab(prefs.tab)
+        openPerson(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        openPerson(intent)
+    }
+
+    /** The card's "Rename" lands here: that person's page, with the name field ready to type in. */
+    private fun openPerson(intent: Intent?) {
+        val id = intent?.getStringExtra(EXTRA_PERSON) ?: return
+        intent.removeExtra(EXTRA_PERSON)
+        selectTab(1)
+        personDetail(id, focusName = true)
     }
 
     override fun onResume() {
@@ -361,8 +376,8 @@ class MainActivity : Activity() {
             usageText = text("", 14f, fg()).also { addView(it) }
         }
         "backup" -> tile(t, toolName(t), L.t(
-            "把人物记忆导出成文件，换手机时导入。API Key 不在里面。",
-            "Save people memory to a file and bring it back on a new phone. API keys are not included.")) {
+            "把人物记忆导出成文件，换手机时导入。API Key 和聊天记录存档不在里面（存档到新手机上再学习一次就有）。",
+            "Save people memory to a file and bring it back on a new phone. API keys and kept chat histories are not included (Learn again on the new phone).")) {
             addView(buttons(L.t("导出", "Export") to { exportMemory() }, L.t("导入", "Import") to { importMemory() }))
         }
         "models" -> tile(t, toolName(t), L.t(
@@ -520,33 +535,70 @@ class MainActivity : Activity() {
         dialog.show()
     }
 
-    private fun personDetail(id: String) {
+    private fun personDetail(id: String, focusName: Boolean = false) {
         val r = people.loadId(id)
         val box = column().apply { setPadding(dp(20), dp(4), dp(20), 0) }
         if (r.muted) box.addView(text(L.t("已暂停：不解读，也不记录。", "Paused: not judged, nothing recorded."), 13f, warn()))
-        box.addView(text(people.describe(id), 13f, sub()).apply { setTextIsSelectable(true) })
+        // A name for chats whose own cannot be read: OCR does not see emoji.
+        box.addView(text(L.t("名字", "Name"), 13f, fg()).apply { setPadding(0, dp(8), 0, 0) })
+        val alias = EditText(this).apply {
+            setText(r.alias)
+            isSingleLine = true
+            hint = if (Person.isFingerprint(r.name)) L.t("名字是 emoji 认不出来，给 Ta 起一个", "Their name is emoji the app can't read: give them one")
+                else L.t("聊天标题上的名字：", "Name in the chat title: ") + r.name
+        }
+        box.addView(alias)
+        box.addView(text(people.describe(id), 13f, sub()).apply { setTextIsSelectable(true); setPadding(0, dp(8), 0, 0) })
         box.addView(text(L.t("Ta 是你的…", "They are your…"), 13f, fg()).apply { setPadding(0, dp(12), 0, 0) })
         lateinit var relPill: TextView
+        lateinit var closePill: TextView
         val showRel = { relPill.text = relationChoice(people.relationOf(id)) + "  ▾" }
+        val showClose = { closePill.text = L.t("亲近：", "Closeness: ") + closenessChoice(people.closenessOf(id)) + "  ▾" }
         relPill = pill("", false) { pickRelation(id, showRel) }
+        closePill = pill("", false) { pickCloseness(id, showClose) }
         showRel()
-        box.addView(wrapRow(listOf(relPill)))
-        box.addView(hint(L.t("选定后每条消息都按这个关系判断，学习此人也不会改掉它。「自动判断」：学习此人时从档案里读出来，没学过就每条看对话判断。",
-            "Every message is then judged as this, and learning this person won't change it. \"Work it out\": taken from the profile when you learn this person, otherwise judged from each chat.")))
+        showClose()
+        box.addView(wrapRow(listOf(relPill, closePill)))
+        box.addView(hint(L.t("关系和亲近程度是两回事：关系好不等于是恋人。选定后每条消息都按这个判断，学习此人也不会改掉。「自动判断」：学习此人时从档案里读出来，没学过就每条看对话判断。",
+            "What they are to you and how close you are are separate: close is not a couple. Once chosen, every message is judged that way and learning won't change it. \"Work it out\": taken from the profile when you learn this person, otherwise judged from each chat.")))
         box.addView(text(L.t("专属背景（发给模型，优先于通用背景）", "Context for this person (sent to the model instead of the general one)"), 13f, fg()).apply { setPadding(0, dp(12), 0, 0) })
         val note = EditText(this).apply { setText(r.note); minLines = 2; hint = L.t("例：大学室友，说话很直", "e.g. college roommate, very blunt") }
         box.addView(note)
-        AlertDialog.Builder(this)
-            .setTitle("${r.name}（${r.apps.joinToString(" · ") { Apps.label(it) }}）")
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("${people.shownName(id)}（${r.apps.joinToString(" · ") { Apps.label(it) }}）")
             .setView(ScrollView(this).apply { addView(box) })
             .setPositiveButton(L.t("保存", "Save")) { _, _ ->
                 val fresh = people.loadId(id)
                 fresh.note = note.text.toString()
+                fresh.alias = alias.text.toString().trim().take(24)
                 people.save(fresh)
-                toast(L.t("已保存 ${fresh.name} 的背景", "Saved context for ${fresh.name}"))
+                toast(L.t("已保存 ${people.shownName(id)}", "Saved ${people.shownName(id)}"))
+                refreshTools()
             }
             .setNeutralButton(L.t("更多…", "More…")) { _, _ -> personActions(id) }
             .setNegativeButton(L.t("关闭", "Close"), null)
+            .show()
+        if (focusName) {
+            alias.requestFocus()
+            dialog.window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
+        }
+    }
+
+    private fun closenessChoice(key: String): String =
+        if (key.isEmpty()) L.t("不确定", "Not sure") else L.label(key)
+
+    /** How close you are, separately from what they are to you. */
+    private fun pickCloseness(id: String, done: () -> Unit) {
+        val keys = listOf("") + Relationship.CLOSENESS
+        val now = keys.indexOf(people.closenessOf(id)).coerceAtLeast(0)
+        AlertDialog.Builder(this)
+            .setTitle(L.t("和 ${people.shownName(id)} 有多亲近", "How close are you to ${people.shownName(id)}"))
+            .setSingleChoiceItems(keys.map { closenessChoice(it) }.toTypedArray(), now) { d, which ->
+                people.setCloseness(id, keys[which])
+                d.dismiss()
+                done()
+            }
+            .setNegativeButton(L.t("取消", "Cancel"), null)
             .show()
     }
 
@@ -558,7 +610,7 @@ class MainActivity : Activity() {
         val keys = listOf("") + Relationship.KEYS
         val now = keys.indexOf(people.relationOf(id)).coerceAtLeast(0)
         AlertDialog.Builder(this)
-            .setTitle(L.t("${people.nameOf(id)} 是你的…", "${people.nameOf(id)} is your…"))
+            .setTitle(L.t("${people.shownName(id)} 是你的…", "${people.shownName(id)} is your…"))
             .setSingleChoiceItems(keys.map { relationChoice(it) }.toTypedArray(), now) { d, which ->
                 people.setRelation(id, keys[which])
                 d.dismiss()
@@ -571,13 +623,14 @@ class MainActivity : Activity() {
     }
 
     private fun personActions(id: String) {
-        val name = people.nameOf(id)
+        val name = people.shownName(id)
         val muted = people.isMuted(id)
+        val kept = people.archiveCount(id)
         val items = arrayOf(
             if (muted) L.t("恢复解读这个人", "Resume judging this person") else L.t("不再解读这个人", "Pause judging this person"),
             L.t("和另一个人合并（跨应用同一人）", "Merge with another person (same person, other app)"),
             L.t("忘记这个人", "Forget this person"),
-        )
+        ) + (if (kept > 0) arrayOf(L.t("删除聊天记录存档（$kept 条，档案保留）", "Delete the kept history ($kept messages; the profile stays)")) else emptyArray())
         AlertDialog.Builder(this)
             .setTitle(name)
             .setItems(items) { _, which ->
@@ -589,6 +642,10 @@ class MainActivity : Activity() {
                     1 -> merge(id)
                     2 -> confirm(L.t("忘记「$name」？学到的一切都会删除。", "Forget $name? Everything learned about them is deleted."), L.t("忘记", "Forget")) {
                         people.forget(id); refreshTools(); toast(L.t("已忘记", "Forgotten"))
+                    }
+                    3 -> confirm(L.t("删除和「$name」的 $kept 条聊天记录存档？档案留着；下次学习会从头读。",
+                        "Delete the $kept kept messages with $name? The profile stays; the next Learn reads from the start."), L.t("删除", "Delete")) {
+                        people.deleteArchive(id); toast(L.t("已删除存档", "Kept history deleted"))
                     }
                 }
             }
@@ -900,9 +957,11 @@ class MainActivity : Activity() {
 
     private fun toast(t: String) = Toast.makeText(this, t, Toast.LENGTH_LONG).show()
 
-    private companion object {
-        const val REQ_EXPORT = 41
-        const val REQ_IMPORT = 42
+    companion object {
+        /** Opens that person's page (the card's "Rename"). */
+        const val EXTRA_PERSON = "dev.vibecheck.PERSON"
+        private const val REQ_EXPORT = 41
+        private const val REQ_IMPORT = 42
 
         /** Tools tab order. Each can be hidden and brought back. */
         val TOOLS = listOf("pause", "people", "card", "usage", "backup", "models", "battery", "diagnostics", "guide")
@@ -913,8 +972,8 @@ class MainActivity : Activity() {
                 "2. 进聊天页，边上出现小气泡；对方发来消息后气泡变色，点开看卡片。\n" +
                 "3. 拖动气泡换位置，长按气泡打开菜单：重新判断、暂停 1 小时、这个聊天不再解读、设置。\n" +
                 "4. 「回复」给出三条草稿，点一条会填进空的输入框（不会发送），长按任意一行复制。\n" +
-                "5. 「学习」会自己往上翻聊天记录，写一份这个人的档案，也记下 Ta 是你的什么人；再点一下气泡就停。\n" +
-                "6. 卡片上 ⋯ → 关系：告诉它 Ta 是你的恋人、朋友、同事……之后每条都按这个判断，不会再把好友当成对象。\n" +
+                "5. 「学习」会自己往上翻完你们的全部聊天记录（随时点气泡停），存在手机上，再分批交给模型写一份详细档案：Ta 是你的什么人、有多亲近、怎么说话、喜好、梗、雷区……回复草稿会照着你以前对 Ta 的真实回复来写。以后再点「学习」只补新的部分。\n" +
+                "6. 卡片上 ⋯ → 关系：Ta 是你的恋人、朋友、同事……以及有多亲近（关系好不等于是恋人），之后每条都按这个判断。名字是 emoji 认不出来时，⋯ → 改名。\n" +
                 "7. 没有气泡就去「诊断」打开调试模式，看服务到底读到了什么。\n\n" +
                 "学习\n" +
                 "卡片给出建议后，下一轮对方的语气变化就是这次建议的回报：变缓和为正，升级为负。" +
@@ -930,8 +989,8 @@ class MainActivity : Activity() {
                 "2. Open a chat: a small bubble appears at the edge and takes on a colour when a message arrives. Tap it for the card.\n" +
                 "3. Drag the bubble to move it. Long-press it for the menu: re-check, pause 1 hour, pause this chat, settings.\n" +
                 "4. Reply gives three drafts; tap one to put it in the empty reply box (it is never sent), long-press any line to copy it.\n" +
-                "5. Learn scrolls up through the history by itself and writes a profile of this person, including who they are to you; tap the bubble to stop early.\n" +
-                "6. On the card, ⋯ → Relationship tells it who they are to you (partner, friend, colleague…). Every message is then judged as that, so a close friend is not read as a partner.\n" +
+                "5. Learn scrolls through your whole history with them by itself (tap the bubble to stop), keeps it on the phone, and has the model write a detailed profile in batches: what they are to you, how close, how they talk, likes, running jokes, sore spots… Reply drafts then follow how you really answered them. Learning again only adds what is new.\n" +
+                "6. On the card, ⋯ → Relationship: what they are to you (partner, friend, colleague…) and how close you are, which is not the same thing. Every message is then judged that way. If their name is emoji the app can't read, ⋯ → Rename.\n" +
                 "7. No bubble? Turn on debug mode under Diagnostics to see what the service actually reads.\n\n" +
                 "Learning\n" +
                 "After the card suggests a move, how the other side's tone changes next turn is that move's reward: calmer is positive, escalation negative. " +

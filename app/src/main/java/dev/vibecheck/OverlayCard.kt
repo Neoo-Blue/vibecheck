@@ -60,6 +60,11 @@ class OverlayCard(
         /** Who the person on the card is to me (Relationship.KEYS, "" = worked out), or null when there is nobody to set it for. */
         fun relationNow(): String?
         fun onSetRelation(key: String)
+        /** How close (Relationship.CLOSENESS, "" = not known), or null when there is nobody to set it for. */
+        fun closenessNow(): String?
+        fun onSetCloseness(key: String)
+        /** The name the card shows is wrong or missing (an emoji name OCR cannot read): name them in the app. */
+        fun onRename()
     }
 
     /** A titled panel under the judgment: the deep read, reply drafts, a learned profile. */
@@ -525,12 +530,17 @@ class OverlayCard(
 
     private fun menuRow(p: Palette, s: Float): View {
         val rel = actions.relationNow()
+        val close = actions.closenessNow()
         val chips = ArrayList<View>()
         chips.add(chip(L.t("重新判断", "Re-check"), p, s) { menu = false; actions.onRescan() })
-        if (rel != null) chips.add(chip(L.t("关系：", "Relationship: ") + relationName(rel) + if (picking) " ▴" else " ▾", p, s) {
-            picking = !picking
-            renderCard(keepScroll = true)
-        })
+        if (rel != null) {
+            val shown = listOfNotNull(relationName(rel), close?.takeIf { it.isNotEmpty() }?.let { L.label(it) }).joinToString(" · ")
+            chips.add(chip(L.t("关系：", "Relationship: ") + shown + if (picking) " ▴" else " ▾", p, s) {
+                picking = !picking
+                renderCard(keepScroll = true)
+            })
+            chips.add(chip(L.t("改名", "Rename"), p, s) { menu = false; actions.onRename() })
+        }
         chips.add(chip(L.t("暂停 1 小时", "Pause 1 h"), p, s) { menu = false; actions.onSnooze() })
         chips.add(chip(L.t("这个聊天不再解读", "Pause this chat"), p, s) { menu = false; actions.onPauseChat() })
         chips.add(chip(L.t("设置", "Settings"), p, s) { menu = false; actions.onSettings() })
@@ -548,6 +558,15 @@ class OverlayCard(
                     picking = false
                     menu = false
                     actions.onSetRelation(key)
+                }
+            }))
+            // How close is its own question: close friends are not a couple.
+            row.addView(line(L.t("有多亲近…", "How close…"), 11f * s, p.header, dp(2)).apply { setPadding(0, dp(6), 0, 0) })
+            row.addView(flow((listOf("") + Relationship.CLOSENESS).map { key ->
+                chip((if (key == (close ?: "")) "✓ " else "") + (if (key.isEmpty()) L.t("不确定", "not sure") else L.label(key)), p, s) {
+                    picking = false
+                    menu = false
+                    actions.onSetCloseness(key)
                 }
             }))
         }

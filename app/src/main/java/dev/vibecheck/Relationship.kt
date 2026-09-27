@@ -1,10 +1,12 @@
 package dev.vibecheck
 
 /**
- * Who the other person is to me. The options are the same eight as Jev's situation question, so
- * a relationship that is known (learned from the history, or set by hand) takes the place of that
- * question: every turn is then judged as what it is, and a best friend is no longer read as a
- * partner because the two of you were talking about someone's boyfriend.
+ * Who the other person is to me, in two separate parts: what kind of relationship (the same
+ * eight options as Jev's situation question) and how close we are. Being close is not being a
+ * couple: the old option "恋爱或亲密关系" mixed the two, and a best friend was read as a partner.
+ *
+ * A relationship that is known (learned from the history, or set by hand) takes the place of
+ * the situation question, so one turn about someone's boyfriend cannot turn a friend into one.
  */
 object Relationship {
 
@@ -24,29 +26,84 @@ object Relationship {
     /** A stored value that names one of the options, or null for "work it out from each chat". */
     fun pinned(value: String?): String? = value?.trim()?.let { normalize(it) }?.takeIf { it in KEYS }
 
+    /** How close we are, from distant to very close. Chinese keys like every option. */
+    val CLOSENESS: List<String> = listOf("不熟", "普通", "熟", "很铁", "无话不谈")
+
+    /** A stored closeness, or null when it is not known. */
+    fun closeness(value: String?): String? = value?.trim()?.takeIf { it in CLOSENESS }
+
     /** The options as the profile prompt lists them, in the UI language. */
-    fun optionList(): String =
-        if (L.en) KEYS.joinToString(", ") { L.english(it) } else KEYS.joinToString("、")
+    fun optionList(): String = list(KEYS)
+
+    fun closenessList(): String = list(CLOSENESS)
+
+    private fun list(keys: List<String>): String =
+        if (L.en) keys.joinToString(", ") { L.english(it) } else keys.joinToString("、")
 
     /** "关系：朋友" or "Relationship: friend", optionally bulleted. */
     private val LINE = Regex("""^[\s•·*\-]*(关系|relationship)[\s*]*[:：][\s*]*(.+?)[\s*]*$""", RegexOption.IGNORE_CASE)
 
+    /** "亲近：很铁" or "Closeness: close". */
+    private val CLOSE_LINE = Regex("""^[\s•·*\-]*(亲近程度|亲近|closeness)[\s*]*[:：][\s*]*(.+?)[\s*]*$""", RegexOption.IGNORE_CASE)
+
+    /** What a profile says about who they are to me, and the profile without the lines that said it. */
+    data class Parsed(val rel: String?, val close: String?, val profile: String)
+
     /**
-     * What a learned profile says this person is to me, and the profile to keep. A profile is
-     * asked to start with "关系：<option>"; that line is taken out, since the relationship is kept
-     * on its own and can later be changed by hand. A profile without one (written by an older
-     * version) is kept whole, and its first line, which says in words who they are to me, is
-     * read for a clear answer instead.
+     * A profile is asked to start with "关系：<option>" and "亲近：<level>". Those lines are taken
+     * out, since both are kept on their own and can later be changed by hand. A profile without
+     * them (written by an older version) is kept whole, and its first line, which says in words
+     * who they are to me, is read for a clear answer instead.
      */
-    fun fromProfile(profile: String): Pair<String?, String> {
+    fun parse(profile: String): Parsed {
         val lines = profile.lines()
-        val firstLines = lines.withIndex().filter { it.value.isNotBlank() }.take(3)
-        for ((i, line) in firstLines) {
-            val value = LINE.matchEntire(line.trim())?.groupValues?.get(2)?.trimEnd('。', '.', '；', ';', '，', ',') ?: continue
-            val key = exact(value) ?: guess(value) ?: return null to profile
-            return key to (lines.take(i) + lines.drop(i + 1)).joinToString("\n").trim()
+        var rel: String? = null
+        var close: String? = null
+        val used = HashSet<Int>()
+        for ((i, line) in lines.withIndex().filter { it.value.isNotBlank() }.take(4)) {
+            LINE.matchEntire(line.trim())?.let { m ->
+                (exact(clean(m.groupValues[2])) ?: guess(clean(m.groupValues[2])))?.let { rel = it; used += i }
+            }
+            CLOSE_LINE.matchEntire(line.trim())?.let { m ->
+                exactCloseness(clean(m.groupValues[2]))?.let { close = it; used += i }
+            }
         }
-        return guess(firstLines.firstOrNull()?.value.orEmpty()) to profile
+        if (used.isEmpty()) {
+            val first = lines.firstOrNull { it.isNotBlank() }.orEmpty()
+            return Parsed(guess(first), guessCloseness(first), profile)
+        }
+        return Parsed(rel, close, lines.filterIndexed { i, _ -> i !in used }.joinToString("\n").trim())
+    }
+
+    /** [parse] for the relationship alone. */
+    fun fromProfile(profile: String): Pair<String?, String> = parse(profile).let { it.rel to it.profile }
+
+    private fun clean(v: String) = v.trim().trimEnd('。', '.', '；', ';', '，', ',')
+
+    fun exactCloseness(value: String): String? {
+        val v = value.trim().trim('「', '」', '"', '“', '”', '*')
+        return CLOSENESS.firstOrNull { it == v } ?: CLOSENESS.firstOrNull { L.english(it).equals(v, ignoreCase = true) }
+    }
+
+    /** Words for how close, per level; see [guessCloseness]. */
+    private val CLOSE_WORDS: Map<String, List<String>> = mapOf(
+        "无话不谈" to listOf("无话不谈", "最好的朋友", "最好的闺蜜", "最亲近", "最铁", "best friend", "closest"),
+        "很铁" to listOf("死党", "铁哥们", "很铁", "闺蜜", "发小", "关系亲密", "很亲近", "很要好", "关系很好", "close friend"),
+        "熟" to listOf("熟人", "挺熟", "比较熟", "老同学", "老朋友"),
+        "普通" to listOf("普通朋友", "一般朋友", "关系一般", "不太联系", "acquaintance"),
+        "不熟" to listOf("不熟", "不太熟", "刚认识", "陌生", "just met"),
+    )
+
+    /**
+     * How close a line of plain words says we are. Words for neighbouring levels ("死党" and
+     * "最好的朋友") settle on the closer one; words far apart are no answer.
+     */
+    fun guessCloseness(text: String): String? {
+        if (text.isBlank()) return null
+        val t = text.lowercase()
+        val levels = CLOSE_WORDS.filter { (_, words) -> words.any { t.contains(it) } }.keys.map { CLOSENESS.indexOf(it) }
+        if (levels.isEmpty() || levels.max() - levels.min() > 1) return null
+        return CLOSENESS[levels.max()]
     }
 
     /** An option named as such, by its key, an older key or its English label. */

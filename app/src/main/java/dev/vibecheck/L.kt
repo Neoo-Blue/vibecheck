@@ -42,6 +42,8 @@ object L {
         "恋人或伴侣" to "partner", "暧昧试探" to "flirting", "朋友" to "friend", "家人" to "family",
         "同事或上下级" to "colleague", "客户或生意" to "client / business",
         "陌生人或刚加上" to "stranger / new contact", "客服或办事" to "customer service / errand",
+        // closeness (Relationship.CLOSENESS)
+        "不熟" to "distant", "普通" to "casual", "熟" to "familiar", "很铁" to "close", "无话不谈" to "very close",
         // intent
         "在开玩笑或一起感慨" to "joking or musing together", "在分享观点或心情" to "sharing a thought or mood",
         "单纯想知道答案" to "just wants an answer", "想确认你在不在乎" to "testing whether you care",

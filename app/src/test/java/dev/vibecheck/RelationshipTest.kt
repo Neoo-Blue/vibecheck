@@ -122,14 +122,17 @@ class RelationshipTest {
         for (k in Relationship.KEYS) assertNotEquals(k, L.english(k))
     }
 
-    @Test fun theProfilePromptAsksForTheLine() {
-        val zh = OpenRouter.BIO_SYSTEM
-        assertTrue(zh.contains("关系："))
-        for (k in Relationship.KEYS) assertTrue(k, zh.contains(k))
+    @Test fun theProfilePromptAsksForBothLines() {
+        for (fromNotes in listOf(true, false)) {
+            val zh = Profile.profileSystem(fromNotes)
+            assertTrue(zh.contains("关系：") && zh.contains("亲近："))
+            for (k in Relationship.KEYS + Relationship.CLOSENESS) assertTrue(k, zh.contains(k))
+            assertTrue("close is not a couple", zh.contains("不等于是恋人"))
+        }
         L.en = true
-        val en = OpenRouter.BIO_SYSTEM
-        assertTrue(en.contains("Relationship: "))
-        for (k in Relationship.KEYS) assertTrue(k, en.contains(L.english(k)))
+        val en = Profile.profileSystem(true)
+        assertTrue(en.contains("Relationship: ") && en.contains("Closeness: "))
+        for (k in Relationship.KEYS + Relationship.CLOSENESS) assertTrue(k, en.contains(L.english(k)))
     }
 
     @Test fun theDeepReadIsToldWhoTheyAre() {

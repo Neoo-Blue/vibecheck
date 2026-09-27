@@ -4,35 +4,54 @@ APKs for every version are on the [releases page](https://github.com/Neoo-Blue/v
 Each section below is also that release's notes: the Release workflow publishes the section whose
 heading matches the tag.
 
-## 6.6.1
+## 6.7.0
 
-A friend whose profile said "best friend" could still be judged as a partner (恋爱或亲密关系 91%).
-Three things caused it, and all three are fixed.
+**Learn this person now learns everything.** It reads your whole history with them (no more
+60-page limit; bigger scrolls and shorter waits, about a page a second), keeps it on the phone, and tops it up with new messages
+as you chat; learning again only reads what is new. The profile is written from all of it, in
+batches, and is far more detailed: what they are to you and how close you are, who they are, how
+you get along, how they talk and how you talk to them (with quotes), likes and dislikes, what you
+talk about, running jokes, things that happened, sore spots, and what helps when they are down.
+The card shows how far it has got.
 
-- **Each person now has a relationship**: partner, flirting, friend, family, colleague, client,
-  stranger or customer service. "Learn this person" fills it in, and you can choose it on the card
-  (⋯ → Relationship) or under Tools → People. Once it is known, Jev is told instead of asked, so
-  the card can no longer contradict it. Profiles learned before this version are read for it from
-  their first line, so there is no need to learn anyone again.
-- **The question was ambiguous.** The option was called 恋爱或亲密关系 ("romance or intimate
-  relationship"), and close friends are 亲密 too. It is now 恋人或伴侣 (partner), friends explicitly
-  include best friends, and the question asks about the two of you, not the topic: friends talking
-  about a boyfriend are still friends. What was learned under the old name carries over.
-- **An empty context assumed romance.** With no note, profile or general context, every request
-  said "a chat within an intimate relationship". Now nothing is assumed.
+**Replies that sound like you.** Reply drafts now get the whole profile plus up to eight real
+exchanges from your history (the ones most like what they just said, and the latest) and the
+things you say most often, and are told to write like you rather than like a template. Deep
+reads use the profile too, and the card adds one line from it when it fits the moment.
+
+**What they are to you, and how close, are two separate things.** A friend whose profile said
+"best friend" was judged 恋爱或亲密关系 91%: being close is not being a couple. Each person now has
+a relationship (partner, flirting, friend, family, colleague, client, stranger, customer service)
+and a closeness (distant, casual, familiar, close, very close). Learning fills both in; you can set
+them on the card (⋯ → Relationship) or under Tools → People. Once the relationship is known, Jev is
+told instead of asked, so one message can no longer turn a friend into a partner. Profiles learned
+before this version are read for both from their first line, so there is no need to learn again.
+- The option 恋爱或亲密关系 is now 恋人或伴侣, friends explicitly include best friends, and the
+  question asks about the two of you, not the topic. What was learned under the old name carries over.
+- With no note, profile or general context, every request used to say "a chat within an intimate
+  relationship". Now nothing is assumed.
+
+**Emoji names.** Names like ❤️, 🧑🏻‍💻 or ✨小鱼✨ are recognised where the app gives text. Where it
+has to use OCR (WeChat, Telegram), emoji cannot be read at all: such a chat is known by the
+avatar beside their messages, the title bar is remembered against it for screens that show only
+your own messages, and ⋯ → Rename gives them a name. "对方正在输入…" is no longer taken for a name.
 
 Also:
-- After "learn this person" the card is judged again, on the same messages, with what was learned,
-  and the profile stays under it. Changing a relationship or a note does the same.
-- A history read leaves the chat scrolled far up, and those old screens used to be judged as if
-  they were the conversation. Judging now waits until the newest messages are back on screen.
+- After learning, the card is judged again, on the same messages, with what was learned, and the
+  profile stays under it. Changing a relationship, closeness, name or note does the same.
+- A history read leaves the chat scrolled far up; those old screens used to be judged as if they
+  were the conversation. Judging now waits until the newest messages are back on screen.
 - A note no longer hides the learned profile: both are sent.
 - Judging the same message again (Re-check included) no longer counts it twice in that person's
   statistics and history.
 - The setting called "relationship context" is now "general context", with a warning not to
   describe one person there: it applies to everyone without their own.
 
-中文：修了「档案说是好朋友，卡片却说恋爱或亲密关系 91%」。每个人现在有一个「关系」：学习此人会自动填上，也可以在卡片 ⋯ → 关系、或「工具 → 人物记忆」里手选；知道关系后直接告诉 Jev，不再让它猜，卡片不会再和档案打架。场合选项「恋爱或亲密关系」改成「恋人或伴侣」（好朋友也算「亲密」，容易误判），问题明确问的是你们两个人的关系，不是聊天话题；没有任何背景时不再默认是「亲密关系」。旧档案第一行说得清楚的，直接读出关系，不用重新学。学习完成后按新档案把当前卡片重新判断一次；学习后停在旧记录页时不再把旧消息拿去判断，翻回最新消息再继续；专属背景不再挡掉档案；同一条消息重新判断不再重复计数。
+**Privacy:** learning a person sends your whole history with them to your OpenRouter model to
+write the profile. Kept histories stay in app-private storage and are not in Backup exports;
+Tools → People → More… deletes one.
+
+中文：「学习此人」现在会翻完你们的全部聊天记录（不再限 60 页，翻得更快，大约一秒一页），存在手机上，之后边聊边补；再学习只读新增的部分。档案按全部记录分批写成，详细得多：Ta 是你的什么人、有多亲近、Ta 是谁、相处方式、Ta 和你各自怎么说话（附原话）、喜好、常聊的事、梗、重要的事、雷区、Ta 难过时怎么办。回复草稿会带上完整档案和最多 8 段你以前对 Ta 的真实回复，写得像你本人而不是模板。关系和亲近程度分开：关系好不等于是恋人；知道关系后直接告诉 Jev，不再让它猜，不会再把好朋友判成恋爱。「恋爱或亲密关系」改名「恋人或伴侣」，没有背景时不再默认是亲密关系。名字是 emoji 的联系人：能读到文字的应用直接认；截图识字的（微信、Telegram）按头像认，⋯ → 改名可以起名字；「对方正在输入…」不再被当成名字。学习后停在旧记录页时不再拿旧消息去判断。注意：学习会把和这个人的全部聊天记录发给你的 OpenRouter 模型。
 
 ## 6.6.0
 

@@ -155,9 +155,10 @@ object Jev {
      * The request body. state carries the relationship context and the visible transcript;
      * every question is asked over that same state.
      *
-     * [relationship] is who they are to me when that is known (Relationship.KEYS). With no
-     * context at all nothing is assumed: this used to say "a chat within an intimate
-     * relationship", and every friend without a profile was judged as a partner.
+     * [relationship] is who they are to me when that is known (Relationship.KEYS), [closeness]
+     * how close we are (Relationship.CLOSENESS): two separate things, since close is not a
+     * couple. With no context at all nothing is assumed: this used to say "a chat within an
+     * intimate relationship", and every friend without a profile was judged as a partner.
      */
     fun stateJson(
         context: String,
@@ -168,6 +169,7 @@ object Jev {
         relation: String? = null,
         source: String? = null,
         relationship: String? = null,
+        closeness: String? = null,
     ): String {
         val msgs = transcript.joinToString(",") { (who, text) ->
             """{"谁":${q(who)},"内容":${q(text)}}"""
@@ -175,6 +177,7 @@ object Jev {
         val parts = ArrayList<String>()
         peer?.takeIf { it.isNotBlank() }?.let { parts.add(""""对方":${q(it)}""") }
         relationship?.takeIf { it.isNotBlank() }?.let { parts.add(""""我和对方的关系":${q(it)}""") }
+        closeness?.takeIf { it.isNotBlank() }?.let { parts.add(""""我们有多亲近":${q(it)}""") }
         context.takeIf { it.isNotBlank() }?.let { parts.add(""""关系背景":${q(it)}""") }
         style?.takeIf { it.isNotBlank() }?.let { parts.add(""""我平时的说话方式":${q(it)}""") }
         history?.takeIf { it.isNotBlank() }?.let { parts.add(""""我们最近几轮的走向":${q(it)}""") }
@@ -216,7 +219,7 @@ object Jev {
      */
     private val SITUATION_QUESTION: String = """
           "situation":{"type":"choice",
-            "instructions":${q("我和对方是什么关系？看的是我们两个人之间的关系，不是聊天的话题：朋友之间聊各自的感情，仍然是朋友。背景里写了关系就以背景为准；没写就只看对话本身，不要默认是恋人。")},
+            "instructions":${q("我和对方是什么关系？看的是我们两个人之间的关系，不是聊天的话题：朋友之间聊各自的感情，仍然是朋友；关系好、聊得亲密也不等于是恋人。背景里写了关系就以背景为准；没写就只看对话本身，不要默认是恋人。")},
             "criteria":{${SITUATION_CRITERIA.joinToString(",") { (k, v) -> "${q(k)}:${q(v)}" }}}},"""
 
     /**

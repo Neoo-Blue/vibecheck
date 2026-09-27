@@ -55,25 +55,17 @@ class AdaptiveTest {
         assertFalse(loveHeaders.contains("时间压力"))
     }
 
-    @Test fun bioPromptKeepsTheNewestWhenTrimming() {
-        val history = (1..200).map { (if (it % 2 == 0) "我" else "对方") to "第${it}条消息内容内容内容" }
-        val p = OpenRouter.bioPrompt("小李", history, maxChars = 600)
-        assertTrue(p.contains("第200条"))
-        assertFalse("oldest lines are the ones dropped", p.contains("第1条消息"))
-        assertTrue(p.contains("共 200 条"))
-    }
-
-    @Test fun backgroundPrefersYourNoteThenTheLearnedBio() {
-        val store = FakeStore()
-        assertEquals("默认", store.background("", "", "默认"))
-        assertEquals("• 学到的", store.background("", "• 学到的", "默认"))
-        assertEquals("我写的", store.background("我写的", "• 学到的", "默认"))
+    @Test fun theWholeHistoryGoesInStretchesNothingDropped() {
+        val history = (1..2000).map { (if (it % 2 == 0) "我" else "对方") to "第${it}条消息内容内容内容" }
+        val chunks = Archive.chunks(history, maxChars = 3000)
+        assertTrue(chunks.size > 1)
+        assertEquals("every message in exactly one stretch, in order", history.indices.toList(), chunks.flatten())
+        for (c in chunks) assertTrue(Archive.text(history, c).length <= 3000 + 60)
+        val p = Profile.profilePrompt("小李", history, "笔记", fromNotes = true)
+        assertTrue(p.contains("共 2000 条（Ta 1000 条，我 1000 条）"))
     }
 
     /** background() is pure logic on the record; mirror it without an Android Context. */
-    private class FakeStore {
-        fun background(note: String, bio: String, fallback: String) = note.ifBlank { bio }.ifBlank { fallback }
-    }
 
     @Test fun olderPagesMergeByOverlapAndKeepRepeats() {
         val m = "对方" to "嗯"
@@ -100,10 +92,11 @@ class AdaptiveTest {
         assertEquals(emptyList<Pair<String, String>>(), Chat.freshLines(kept, kept))
     }
 
-    @Test fun bioPromptSurvivesAPastedArticleAndMultilineMessages() {
+    @Test fun historyTextSurvivesAPastedArticleAndMultilineMessages() {
         val article = "对方" to "长".repeat(10_000)
-        val p = OpenRouter.bioPrompt("小李", listOf("我" to "第一行\n第二行", article))
+        val p = Archive.text(listOf("我" to "第一行\n第二行", article))
         assertTrue("the article is capped, not dropped with everything else", p.contains("对方：" + "长".repeat(300)))
+        assertFalse(p.contains("长".repeat(401)))
         assertTrue("older lines still there", p.contains("我：第一行 第二行"))
         assertFalse(p.contains("第一行\n第二行"))
     }

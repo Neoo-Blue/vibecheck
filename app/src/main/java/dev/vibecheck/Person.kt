@@ -22,9 +22,15 @@ object Person {
     /** The presence line under a name in a chat header: WhatsApp, Telegram, Messenger, Instagram. */
     private val SUBTITLE = Regex(
         """(Active .*|Online|last seen.*|typing.*|\d+ (members|participants|subscribers|online).*|""" +
-            """tap here for contact info|在线|正在输入.*|最后上线.*|\d+ ?位?成员)""",
+            """tap here for contact info|在线|(对方)?正在(输入|讲话|说话).*|最后上线.*|\d+ ?位?成员)""",
         RegexOption.IGNORE_CASE,
     )
+
+    /** What WeChat and others put where the name was while the other person types. */
+    private val TYPING = Regex("""((对方)?正在(输入|讲话|说话)|.*typing).*""", RegexOption.IGNORE_CASE)
+
+    /** The title band shows a typing indicator instead of the name: the chat itself has not changed. */
+    fun isTyping(titles: List<Pair<String, Chat.Box>>): Boolean = titles.any { TYPING.matches(it.first.trim()) }
 
     /**
      * The contact name from the chat title bar. Candidates are TextViews in the top band of the
@@ -47,17 +53,23 @@ object Person {
      */
     fun looksLikeName(raw: String): Boolean {
         val s = raw.trim()
-        if (s.length !in 1..24 || s in TITLE_JUNK || SUBTITLE.matches(s)) return false
-        val solid = s.filterNot { it.isWhitespace() }
-        if (solid.isEmpty()) return false
-        val letters = solid.count { it.isLetter() }
-        if (letters >= 2 && letters * 10 >= solid.length * 6) return true   // at least 60% letters
-        // Names like "🍵" or "Dory🐟" are legitimate; clock and icon noise is not, so require
-        // every character to be either a letter or an emoji.
-        val emoji = solid.codePoints().filter { isEmoji(it) }.count().toInt()
-        val emojiChars = solid.count { Character.isHighSurrogate(it) || Character.isLowSurrogate(it) }
-        return emoji >= 1 && letters + emojiChars + emoji >= solid.length
+        if (s.isEmpty() || s.length > 64 || s in TITLE_JUNK || SUBTITLE.matches(s)) return false
+        // Counted in code points: one emoji is two chars, a family emoji eleven.
+        val cps = s.filterNot { it.isWhitespace() }.codePoints().toArray()
+        if (cps.isEmpty() || cps.size > 24) return false
+        val letters = cps.count { Character.isLetter(it) }
+        if (letters >= 2 && letters * 10 >= cps.size * 6) return true   // at least 60% letters
+        // Names like "🍵", "❤️" or "Dory🐟" are legitimate; clock and icon noise is not, so every
+        // character has to be a letter or part of an emoji: the pictograph itself, or the
+        // variation selector, joiner or skin tone that goes with it.
+        val pictographs = cps.count { !isEmojiPart(it) && (isEmoji(it) || Character.getType(it) == Character.OTHER_SYMBOL.toInt()) }
+        val joiners = cps.count { isEmojiPart(it) }
+        return pictographs >= 1 && letters + pictographs + joiners >= cps.size
     }
+
+    /** Code points that only ever travel inside an emoji: ZWJ, variation selectors, keycap, skin tones, tags. */
+    private fun isEmojiPart(cp: Int): Boolean =
+        cp == 0x200D || cp in 0xFE00..0xFE0F || cp == 0x20E3 || cp in 0x1F3FB..0x1F3FF || cp in 0xE0020..0xE007F
 
     /**
      * Difference hash of the sampled region: a stable id for a chat whose name cannot be read.
