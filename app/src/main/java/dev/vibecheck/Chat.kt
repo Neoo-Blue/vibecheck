@@ -71,6 +71,8 @@ object Chat {
     private val SYSTEM_ROW = Regex(
         """(((missed|cancell?ed|declined|outgoing|incoming) (voice |video |audio )?call|(voice|video|audio) call)( ended| back)?|""" +
             """call ended|huddle ended|(语音|视频)通话(已取消|已拒绝|未接听|对方已取消|对方已拒绝|对方无应答|已挂断)?|""" +
+            // The floating "jump to the newest" pill of a chat scrolled up.
+            """\d+\s*条新消息|有新消息|回到底部|\d+ (new|unread) messages?|""" +
             """message not delivered|(send|type|write) a message(…|\.\.\.)?|say hi( to $ACTOR)?|""" +
             """(seen|liked|loved) by $ACTOR( and \d+ others?)?|(liked|loved|laughed at|emphasized|questioned|disliked) ["“].*|""" +
             """you replied to ($ACTOR|their story|your story)|$ACTOR replied to (you|your story)|replied to (you|yourself|$ACTOR)|""" +
@@ -97,12 +99,70 @@ object Chat {
         if (box.width <= 0 || box.bottom <= box.top) return true
         val h = (win.bottom - win.top).coerceAtLeast(1)
         if (box.top < win.top + h * 0.06) return true       // action bar / contact name
+        // Wholly inside the title bar: the unread count on the back button, a presence line, a
+        // button like Soul's 「加速」. A message scrolled under the bar is clipped to its edge, so
+        // only a sliver of one ends this high.
+        if (box.bottom <= win.top + h * 0.11) return true
         // Only the input row itself. The newest bubble often sits right on top of it, and the
         // EditText and send Button are already excluded by class, so this can stay permissive.
         if (box.bottom > win.top + h * 0.96) return true
-        // Centered short text in a chat list is a date divider or "对方撤回了一条消息".
-        if (abs(box.centerX - (win.left + win.right) / 2) < win.width * 0.10 && box.width < win.width * 0.55) return true
+        // Centered short text in a chat list is a date divider or "对方撤回了一条消息". Centered
+        // means as far from both edges: next to an avatar, a message of theirs that ends past
+        // the middle ("不是美女，有什么好看的" on Soul) has its centre near the middle too.
+        if (abs((box.left - win.left) - (win.right - box.right)) < win.width * 0.06 && box.width < win.width * 0.55) return true
         return false
+    }
+
+    /**
+     * Which of the texts on screen are messages: not chrome on their own ([isChrome]), not in a
+     * row of texts side by side ([sideBySide]), and above the reply box when it is known.
+     * Everything from the top of the reply box down is the compose area (a send button drawn as
+     * text, a hint), wherever the keyboard has pushed it.
+     */
+    fun messageIndices(items: List<Pair<String, Box>>, win: Box, input: Box? = null): List<Int> {
+        val strip = sideBySide(items)
+        return items.indices.filter { i ->
+            val (text, box) = items[i]
+            i !in strip && !isChrome(box, text, win) && (input == null || (box.top + box.bottom) / 2 < input.top)
+        }
+    }
+
+    /**
+     * The texts that sit beside two or more others on one row: a strip of quick replies,
+     * stickers and games (Soul's 「下午好」「礼物」「桌球」「比心」「猜拳」 above the reply box), a
+     * toolbar, a row of reactions. A chat stacks its messages one per row, so three short texts
+     * side by side are never messages. Read as messages, Soul's strip was the newest thing "they"
+     * said, and the replies answered 「下午好」. A time or delivery mark beside a message
+     * ("ok 10:32") is not counted toward a row.
+     */
+    fun sideBySide(items: List<Pair<String, Box>>): Set<Int> {
+        // The node tree repeats nodes: rows are made of distinct texts, and every copy goes.
+        val cells = items.filter { (text, box) ->
+            text.isNotBlank() && text.codePointCount(0, text.length) <= STRIP_CHARS &&
+                box.width > 0 && box.bottom > box.top && !isTimeOrDate(text) && !isNotification(text)
+        }.distinct()
+        val rows = ArrayList<MutableList<Pair<String, Box>>>()
+        for (c in cells.sortedBy { it.second.top + it.second.bottom }) {
+            val row = rows.firstOrNull { r -> r.all { sameRow(it.second, c.second) } }
+            if (row != null) row.add(c) else rows.add(mutableListOf(c))
+        }
+        val strip = HashSet<Pair<String, Box>>()
+        for (r in rows) {
+            if (r.size < 3) continue
+            // Side by side, not one inside another.
+            val byLeft = r.sortedBy { it.second.left }
+            if (byLeft.zipWithNext().all { (a, b) -> b.second.left >= a.second.right - 2 }) strip += r
+        }
+        return items.indices.filterTo(HashSet()) { items[it] in strip }
+    }
+
+    /** Longer than this is a sentence, not a chip. */
+    private const val STRIP_CHARS = 16
+
+    /** Two boxes on one line: most of the shorter one's height is shared. */
+    private fun sameRow(a: Box, b: Box): Boolean {
+        val overlap = minOf(a.bottom, b.bottom) - maxOf(a.top, b.top)
+        return overlap * 10 >= minOf(a.bottom - a.top, b.bottom - b.top) * 6
     }
 
     /**
@@ -120,16 +180,31 @@ object Chat {
         items: List<Pair<String, Box>>,
         win: Box,
         exclude: List<Box>,
+        input: Box? = null,
     ): Pair<List<Bubble>, List<Pair<String, Box>>> {
         val h = (win.bottom - win.top)
         // Between the status bar and the end of the title bar. The status bar is where the clock
         // and icons live, and OCR turns those into convincing-looking garbage.
         val titles = items.filter { it.second.top >= win.top + h * 0.035 && it.second.top < win.top + h * 0.07 }
-        val bubbles = items
-            .filterNot { item -> exclude.any { overlaps(item.second, it) } }
-            .filterNot { isChrome(it.second, it.first, win) }
+        val visible = items.filterNot { item -> exclude.any { overlaps(item.second, it) } }
+        val bubbles = messageIndices(visible, win, input)
+            .map { visible[it] }
             .map { Bubble(it.first, isIncoming(it.second, win), it.second) }
         return order(bubbles) to titles
+    }
+
+    /**
+     * Where the reply box is while the keyboard is up, for a screen read by OCR, which has no text
+     * field to go by: the row right above the keyboard. Read as a message, a draft being typed
+     * there was "their" newest line. Null for a keyboard that does not sit along the bottom.
+     */
+    fun replyRowAbove(ime: Box?, win: Box): Box? {
+        val h = win.bottom - win.top
+        if (ime == null || ime.width < win.width * 0.8 || ime.top <= win.top + h * 0.3) return null
+        // A window the keyboard has shrunk ends where the keyboard starts.
+        val bottom = minOf(ime.top, win.bottom)
+        val row = maxOf(h * 0.065, (ime.bottom - ime.top) * 0.16).toInt()
+        return Box(win.left, bottom - row, win.right, bottom)
     }
 
     fun overlaps(a: Box, b: Box): Boolean =

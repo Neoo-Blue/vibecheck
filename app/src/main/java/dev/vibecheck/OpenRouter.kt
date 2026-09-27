@@ -97,28 +97,52 @@ object OpenRouter {
     // ---- prompts ----
 
     val DEEP_SYSTEM: String get() = L.t(
-        "你是一个懂中文聊天潜台词的分析者。只说有用的话，不寒暄，不复述原文，不写免责声明。" +
+        "你帮我（对话里的「我」）看懂这段聊天的潜台词，话是说给我听的：称我为「你」，称对方为「Ta」或 Ta 的名字。" +
+            "只说有用的话，不寒暄，不复述原文，不写免责声明。" +
             "有 Ta 的档案就用上：Ta 的性格、喜好、雷区、我们之间的梗，说只对这个人成立的话，别说放在谁身上都对的套话。" +
-            "输出三行，每行以「•」开头：第一行说对方真正在意什么，第二行说这一步最容易踩的坑，" +
-            "第三行给一个具体到可以照做的下一步。每行不超过 40 个字。",
-        "You read the subtext of chat messages. Only say what is useful: no pleasantries, no quoting the " +
+            "输出三行，每行以「•」开头：第一行说 Ta 此刻真正在意或想要什么（说的是 Ta，不是我）；第二行说我这一步最容易踩的坑；" +
+            "第三行给我一个具体到可以照做的下一步，最后一句是我说的、Ta 还没回时，说清该等还是该补一句、补什么。每行不超过 40 个字。",
+        "You help me (\"Me\" in the chat) read the subtext of this conversation, and you are talking to me: call me " +
+            "\"you\" and the other person \"they\" or their name. Only say what is useful: no pleasantries, no quoting the " +
             "messages back, no disclaimers. If there is a profile of them, use it: their character, likes, sore spots, " +
             "our running jokes. Say what is true of this person, not what would fit anyone. Output three lines, each " +
-            "starting with \"•\": what they actually care about; the trap in this step; one next move concrete enough " +
-            "to do as written. Max 20 words each.")
+            "starting with \"•\": what they actually care about or want right now (them, not me); the trap for me in this " +
+            "step; one next move for me, concrete enough to do as written. When the last message is mine and they have " +
+            "not answered, say whether to wait or add something, and what. Max 20 words each.")
 
+    /**
+     * Drafts of my next message. The old prompt asked for the same three strategies every time
+     * (catch the feeling, a concrete plan, defuse it), in thirty characters: for a flirt that had
+     * gone quiet it offered 「下午好」「歇会」「嗯」. Now the model first says in one line what
+     * the moment is ([replies] shows that line above the drafts), knows whose turn it is, and
+     * writes three different things I would actually send.
+     */
     val REPLY_SYSTEM: String get() = L.t(
-        "你替我起草回复，用这段对话本身的语言（对话是英文就写英文）。要像我本人对这个人说话：" +
-            "用我平时对 Ta 的称呼、口头禅、语气词、标点、表情和长度；下面有我以前对 Ta 的真实回复就照着那个味道写，学语气和用词，不要照抄原句。" +
-            "可以自然地用上 Ta 的喜好、近况和我们之间的梗，但别硬塞。不要写成客服或心理咨询的口气。" +
-            "给三条不同策略的候选：第一条先接住情绪，第二条给具体方案，第三条轻松化解。" +
-            "每条单独一行，用「1. 」「2. 」「3. 」开头，每条不超过 30 个字，不要解释。",
-        "You draft replies for me, in the language the conversation is in. Sound like me talking to this person: " +
-            "the names I use for them, my catchphrases, fillers, punctuation, emoji and length. Where my real past replies " +
-            "to them are given, write in that voice: learn the tone and words, don't copy the lines. Work in their likes, " +
-            "news and our running jokes where they fit naturally, never forced. Never sound like customer service or a " +
-            "therapist. Give three candidates with different strategies: 1 catches the feeling first, 2 gives a concrete " +
-            "plan, 3 defuses it lightly. One per line, starting \"1. \" \"2. \" \"3. \", max 20 words each, no explanations.")
+        "你帮我（对话里的「我」）想下一条要发的消息。先看清局面再写：最后一句是谁说的，Ta 此刻的情绪和意图，我们是什么关系，聊到哪了。\n" +
+            "• 像我本人在说话：用我平时对 Ta 的称呼、口头禅、语气词、标点、表情和长短。如果下面附了我以前对 Ta 的真实回复，就照那个味道写，学语气和用词，不要照抄原句。用这段对话本身的语言。\n" +
+            "• 每条都要接住最近几句里具体的内容，放进这段对话里读起来自然、有来有回。可以用上 Ta 的喜好、近况和我们的梗，但别硬塞。\n" +
+            "• 不写放在哪段对话里都成立的话：和上文无关的问候（「下午好」「在吗」），只回「嗯」「哦」「好的」这种把天聊死的话，说教，客服腔，心理咨询腔。\n" +
+            "• 判断模型说要给空间时：可以短、可以不追问，但要让 Ta 舒服、好接话，不是冷淡。\n" +
+            "• 最后一句是我说的、Ta 还没回：写的是追发的一句，要自然、不追问、不重复我刚说过的、不给压力；这时如果更适合先不发，就在判断里直说。\n" +
+            "• 三条要真的不一样：方向、语气或力度不同，但都得是我真会发出去的话。\n" +
+            "输出：第一行以「判断：」开头，一句话说现在是什么局面、该往哪走，不超过 30 个字。然后三行，分别以「1. 」「2. 」「3. 」开头，每条不超过 40 个字，不加引号，不解释。",
+        "You help me (\"Me\" in the chat) write my next message. Read the moment first: who sent the last message, what " +
+            "they feel and want right now, what we are to each other, where the conversation is.\n" +
+            "• Sound like me: the names I use for them, my catchphrases, fillers, punctuation, emoji and length. Where my " +
+            "real past replies to them are given, write in that voice: learn the tone and words, don't copy the lines. Use " +
+            "the language the conversation is in.\n" +
+            "• Every draft picks up something specific from the last few messages and reads naturally as the next line of " +
+            "this conversation. Work in their likes, news and our running jokes where they fit, never forced.\n" +
+            "• Nothing that would fit any conversation: greetings unrelated to what was said (\"good afternoon\", \"you " +
+            "there?\"), a bare \"ok\" or \"mm\" that ends the conversation, lecturing, customer-service or therapist talk.\n" +
+            "• When the judgment model says to give them space: short and no questions is fine, but easy and warm to " +
+            "answer, not cold.\n" +
+            "• When the last message is mine and they have not answered: write a natural follow-up that asks nothing, does " +
+            "not repeat what I just said and puts no pressure on them; if it is better to send nothing yet, say so in the " +
+            "read.\n" +
+            "• The three drafts differ for real, in direction, tone or strength, and each is something I would actually send.\n" +
+            "Output: a first line starting \"Read: \" saying in one sentence what the moment is and where to take it (max 20 " +
+            "words). Then three lines starting \"1. \" \"2. \" \"3. \", max 25 words each, no quotes, no explanations.")
 
     /** "1. ", "1.你好", "1．", "2、", "3) ", "- ", "• ": a numbered or bulleted line, but not "1.5 hours works". */
     private val DRAFT_PREFIX = Regex("""^\s*(\d{1,2}([.．](?!\d)|[、)）])\s*|[-•*·]\s+)""")
@@ -132,6 +156,20 @@ object OpenRouter {
         val lines = answer.lines().map { it.trim() }.filter { it.isNotEmpty() }
         val numbered = lines.filter { DRAFT_PREFIX.containsMatchIn(it) }
         return (if (numbered.size >= 2) numbered else lines).map { draftText(it) }.filter { it.isNotEmpty() }
+    }
+
+    /** A reply answer: the model's one-line read of the moment (shown above the drafts), and the drafts. */
+    class Replies(val read: String?, val drafts: List<String>)
+
+    /** "判断：", "**判断**：", "Read: ". */
+    private val READ_PREFIX = Regex("""^[\s*_#>]*(判断|局面|read|reading|situation)[\s*_]*[:：]\s*""", RegexOption.IGNORE_CASE)
+
+    fun replies(answer: String): Replies {
+        val lines = answer.lines().map { it.trim() }.filter { it.isNotEmpty() }
+        val at = lines.indexOfFirst { READ_PREFIX.containsMatchIn(it) }
+        if (at < 0) return Replies(null, drafts(answer))
+        val read = lines[at].replaceFirst(READ_PREFIX, "").trim().trim('*', '_').trim().takeIf { it.isNotEmpty() }
+        return Replies(read, drafts(lines.filterIndexed { i, _ -> i != at }.joinToString("\n")))
     }
 
     fun draftText(line: String): String {
@@ -172,7 +210,9 @@ object OpenRouter {
         relation?.let { append(L.t("这段关系的长期观察：", "Long-term observations: ")).append(it).append('\n') }
         append(L.t("\n最近的对话（从上到下）：\n", "\nRecent messages (top to bottom):\n"))
         transcript.forEach { (who, text) -> append(L.who(who)).append(L.t("：", ": ")).append(text).append('\n') }
-        append(L.t("\n小模型对最后一条的判断：\n", "\nThe judgment model's read of the last message:\n"))
+        turn(transcript)?.let { append(it).append('\n') }
+        append(L.t("\n判断模型的快速读数（供参考，和对话本身对不上时以对话为准）：\n",
+            "\nThe judgment model's quick read (a hint; where it disagrees with the conversation, the conversation wins):\n"))
         for ((id, header) in Jev.headers(situation)) {
             when (val a = answers[id] ?: continue) {
                 is Jev.Answer.Noul -> append("• ").append(L.label(header)).append(L.t("：", ": ")).append(Jev.pct(a.p)).append('\n')
@@ -190,6 +230,16 @@ object OpenRouter {
             if (hasImage) append(L.t("随附的截图是完整画面，表情包和表情以截图为准。",
                 " The attached screenshot is the full picture; trust it for stickers and emoji."))
         }
+    }
+
+    /**
+     * Whose move it is. Without it a draft could answer my own last message as if it were theirs,
+     * and a chat where I am waiting for an answer got replies to what they said before.
+     */
+    fun turn(transcript: List<Pair<String, String>>): String? {
+        val (who, text) = transcript.lastOrNull() ?: return null
+        return if (who == "我") L.t("最后一句是我说的（「${text.take(40)}」），Ta 还没回。", "The last message is mine (\"${text.take(40)}\"); they have not answered yet.")
+        else L.t("最后一句是 Ta 说的，轮到我了。", "The last message is theirs; it is my turn.")
     }
 
     /**

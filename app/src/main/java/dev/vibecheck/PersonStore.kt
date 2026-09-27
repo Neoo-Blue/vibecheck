@@ -113,7 +113,7 @@ class PersonStore(ctx: Context) {
             model = Learner.load(sp.getString("$id:learn", "") ?: ""),
             history = Person.loadHistory(sp.getString("$id:hist", "") ?: ""),
             stats = Relation.load(sp.getString("$id:stats", "") ?: ""),
-            tail = Person.loadTail(sp.getString("$id:tail", "") ?: ""),
+            tail = Archive.withoutStrips(Person.loadTail(sp.getString("$id:tail", "") ?: "")),
             legacySeen = sp.getString("$id:seen", "") ?: "",
             bio = bio,
             learned = sp.getInt("$id:learned", 0),
@@ -283,7 +283,7 @@ class PersonStore(ctx: Context) {
 
     /** The kept history of one chat, oldest first; empty when it has none. */
     fun archive(own: String): List<Pair<String, String>> =
-        runCatching { file(own).takeIf { it.exists() }?.readText()?.let { Archive.decode(it) } }.getOrNull() ?: emptyList()
+        runCatching { file(own).takeIf { it.exists() }?.readText()?.let { Archive.withoutStrips(Archive.decode(it)) } }.getOrNull() ?: emptyList()
 
     /** Everything kept for a person: their chat's history and every linked chat's. */
     fun archiveAll(id: String): List<Pair<String, String>> {

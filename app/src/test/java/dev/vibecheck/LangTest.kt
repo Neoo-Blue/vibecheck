@@ -34,7 +34,7 @@ class LangTest {
 
     @Test fun promptsAndSummariesFollowTheLanguage() {
         L.en = true
-        assertTrue(OpenRouter.DEEP_SYSTEM.startsWith("You read the subtext"))
+        assertTrue(OpenRouter.DEEP_SYSTEM.startsWith("You help me"))
         val p = OpenRouter.deepPrompt("Sam", "", null, null, null, listOf("对方" to "hey", "我" to "hi"), answers, false, false, "朋友")
         assertTrue(p.contains("Them: Sam"))
         assertTrue(p.contains("them: hey") && p.contains("me: hi"))
