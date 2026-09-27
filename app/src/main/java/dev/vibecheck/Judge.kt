@@ -52,7 +52,29 @@ object Judge {
             s in 500..599 -> L.t("服务暂时出错（$s），稍后自动重试", "Service error ($s); will retry")
             e is java.net.UnknownHostException || e is java.net.ConnectException -> L.t("连不上网络", "No connection")
             e is java.net.SocketTimeoutException -> L.t("请求超时", "Timed out")
+            // A certificate problem, not a drop: say what it is.
+            e is javax.net.ssl.SSLHandshakeException -> (e.message ?: e.javaClass.simpleName).take(80)
+            // "Software caused connection abort", "Connection reset": what Android does to a request
+            // in flight when it takes the network away, as it does for us once the screen goes off.
+            // Mid-read on a TLS connection that arrives as an SSLException.
+            e is java.net.SocketException || e is javax.net.ssl.SSLException || e is java.io.EOFException ->
+                L.t("网络中途断了（锁屏或切换网络时会这样）", "The connection dropped (locking the screen or switching networks does this)")
             else -> (e.message ?: e.javaClass.simpleName).take(80)
+        }
+    }
+
+    /**
+     * Worth asking again in a moment: the connection dropped or timed out, the service was busy,
+     * or the model stopped before answering. Not a rejected key, an empty balance or a refusal.
+     */
+    fun isTransient(e: Throwable): Boolean {
+        val s = status(e)
+        return when {
+            s == 408 || s == 429 || s in 500..599 -> true
+            s != 0 -> false
+            e is javax.net.ssl.SSLHandshakeException -> false
+            e is java.io.IOException -> true
+            else -> e is OpenRouter.Failure || e is TypeSafe.Failure
         }
     }
 

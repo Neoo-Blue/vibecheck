@@ -75,8 +75,11 @@ class OverlayCard(
         fun namePicture(): Bitmap?
     }
 
-    /** A titled panel under the judgment: the deep read, reply drafts, a learned profile. */
-    class Section(val title: String, val lines: List<String>, val pickable: Boolean = false)
+    /**
+     * A titled panel under the judgment: the deep read, reply drafts, a learned profile. [read]
+     * is the one-line read of the moment shown above reply drafts, not a draft itself.
+     */
+    class Section(val title: String, val lines: List<String>, val pickable: Boolean = false, val read: String? = null)
 
     private val wm = svc.getSystemService(WindowManager::class.java)
     private val main = Handler(Looper.getMainLooper())
@@ -248,6 +251,22 @@ class OverlayCard(
         removeBubble()
         render()
     }
+
+    /**
+     * True while a history read or a profile write is under way: our window then keeps the
+     * screen on, because Android takes the network from a background app once it goes off.
+     */
+    private var awake = false
+
+    fun keepAwake(on: Boolean) {
+        if (awake == on) return
+        awake = on
+        bubbleView?.let { v -> bubbleParams?.let { lp -> lp.flags = awakeFlags(lp.flags); runCatching { wm.updateViewLayout(v, lp) } } }
+        cardRoot?.let { v -> (v.layoutParams as? WindowManager.LayoutParams)?.let { lp -> lp.flags = awakeFlags(lp.flags); runCatching { wm.updateViewLayout(v, lp) } } }
+    }
+
+    private fun awakeFlags(flags: Int): Int = if (awake) flags or WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        else flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON.inv()
 
     /** True while our windows are invisible for a screenshot; every render respects it. */
     private var capturing = false
@@ -615,6 +634,7 @@ class OverlayCard(
         orientation = LinearLayout.VERTICAL
         addView(spacer(dp(6)))
         addView(line(sec.title, 12f * s, p.title, dp(3), bold = true))
+        sec.read?.let { r -> addView(line(r, 12f * s, p.body, dp(5)).apply { setOnLongClickListener { actions.onCopy(r); true } }) }
         for (l in sec.lines) {
             val tv = line(l, 12f * s, p.body, dp(5))
             tv.setOnLongClickListener { actions.onCopy(l); true }
@@ -633,10 +653,10 @@ class OverlayCard(
         WindowManager.LayoutParams(
             w, h,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+            awakeFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS),
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START

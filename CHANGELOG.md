@@ -4,6 +4,60 @@ APKs for every version are on the [releases page](https://github.com/Neoo-Blue/v
 Each section below is also that release's notes: the Release workflow publishes the section whose
 heading matches the tag.
 
+## 6.7.2
+
+**Reply drafts that fit the moment.** In Soul, the strip of quick replies above the reply box
+(下午好, 礼物, 桌球, 比心, 猜拳) was read as messages. The newest thing "they" had said was
+「下午好」, so the drafts answered it with 「下午好」「歇会」「嗯」 and the deep read said to reply
+下午好. Now none of these is read as a message:
+- rows of short texts side by side (quick replies, toolbars, reactions);
+- anything at or below the reply box, wherever the keyboard has pushed it: a send button, the
+  draft you are typing;
+- what sits in the title bar: the unread count on the back button, Soul's 加速.
+
+What older versions kept from that strip is dropped from saved histories.
+- A message of theirs that ended near the middle of the screen, next to their avatar
+  (「不是美女，有什么好看的」), was taken for a centred date divider and skipped. Centred now means
+  equally far from both edges.
+- Drafts are no longer the same three strategies in 30 characters (catch the feeling, a concrete
+  plan, defuse it). The model is told whose turn it is. It first writes one line on the moment,
+  shown above the drafts. Then it gives three different things you would actually send, each
+  picking up what was just said: no greeting out of nowhere, no bare 嗯, and "give them space"
+  means easy to answer, not cold. When your message is the last one, the drafts are follow-ups
+  that ask nothing, or the line says to wait.
+- Deep reads and drafts see up to 30 lines. For people you have learned, that includes saved
+  history from before what is on screen.
+- The deep read talks to you about them: its first line is what they care about, not what you
+  do. When you spoke last, it says whether to wait or add something.
+
+**Learning survives a dropped connection.** A profile of a few thousand messages failed halfway
+with "Software caused connection abort": Android cuts off a background app's network once the
+screen goes off. Now:
+- the screen stays on while a history is read and while the profile is written;
+- each call is tried again after a pause;
+- finished stretches are saved as they land;
+- a write that still loses its connection carries on by itself when you are back in that chat.
+
+Errors like this one are now described in plain words.
+
+中文：
+- 回复更贴合当下。Soul 输入框上方那排快捷回复（下午好、礼物、桌球、比心、猜拳）以前被当成了聊天消息，所以对方「最新说的」是「下午好」，草稿就回「下午好」「歇会」「嗯」，深思也让你回下午好。
+- 现在这些都不再当成消息：
+  - 并排的一排短字（快捷回复、工具栏、表情回应）；
+  - 输入框及以下的一切（键盘推上去也一样）；
+  - 标题栏里的字（返回键上的未读数、Soul 的「加速」）。
+- 旧版本存进聊天记录里的那排字会被清掉。
+- 靠着头像、结尾停在屏幕中间附近的对方消息（如「不是美女，有什么好看的」）以前会被当成居中的日期分隔线而漏掉，现在修好了。
+- 回复不再是固定的三种套路。模型先知道轮到谁说话，写一句「判断」（显示在草稿上面），再给三条真的不一样、你真会发的话。
+- 最后一句是你说的时，给的是不施压的追发，或者直接建议先等等。
+- 深思和回复能看到最多 30 行上下文：学过的人会从存档里补上屏幕之前的记录。
+- 深思的第一句说的是 Ta 在意什么，不再说成你。
+- 写档案不怕断网。以前写到一半会报「Software caused connection abort」，因为锁屏后 Android 会断掉后台应用的网络。现在：
+  - 读记录和写档案时屏幕保持常亮；
+  - 每次调用失败会隔一会儿重试；
+  - 写好的部分随写随存；
+  - 还是断了的话，回到这个聊天会自动接着写。
+
 ## 6.7.1
 
 **Updates install over the previous version from now on.** Every release until now was signed

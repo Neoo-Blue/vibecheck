@@ -48,6 +48,34 @@ object Archive {
         return out
     }
 
+    /**
+     * Lines that were never messages: Soul's strip of quick replies above the reply box
+     * (「下午好」「礼物」「桌球」「比心」「猜拳」), which versions up to 6.7.1 read as messages and
+     * kept. Only a run of three or more of its labels in a row goes, at least half of them and at
+     * least two different ones the non-greeting labels: nobody sends that.
+     */
+    fun withoutStrips(lines: List<Pair<String, String>>): List<Pair<String, String>> {
+        var drop: BooleanArray? = null
+        var i = 0
+        while (i < lines.size) {
+            var j = i
+            while (j < lines.size && lines[j].second.trim() in STRIP_LABELS) j++
+            if (j - i >= 3) {
+                val games = (i until j).map { lines[it].second.trim() }.filter { it in STRIP_GAMES }
+                if (games.distinct().size >= 2 && games.size * 2 >= j - i) {
+                    val d = drop ?: BooleanArray(lines.size).also { drop = it }
+                    for (k in i until j) d[k] = true
+                }
+            }
+            i = maxOf(j, i + 1)
+        }
+        val d = drop ?: return lines
+        return lines.filterIndexed { k, _ -> !d[k] }
+    }
+
+    private val STRIP_GAMES = setOf("礼物", "桌球", "比心", "猜拳", "骰子")
+    private val STRIP_LABELS = STRIP_GAMES + setOf("早上好", "上午好", "中午好", "下午好", "晚上好", "晚安")
+
     // ---- joining a history read onto what is kept ----
 
     /**
@@ -69,6 +97,21 @@ object Archive {
         keptTail.isNotEmpty() && page.isNotEmpty() && Chat.alignEnd(keptTail, page) != null
 
     const val MERGE_WINDOW = 300
+
+    /**
+     * The lines on screen with the kept history just before them, [n] lines in all: a reply
+     * written from the dozen lines a screen holds misses what the chat was about. The screen
+     * alone when it does not line up with what was kept.
+     */
+    fun before(kept: List<Pair<String, String>>, screen: List<Pair<String, String>>, n: Int): List<Pair<String, String>> {
+        if (kept.isEmpty() || screen.isEmpty() || screen.size >= n) return screen
+        val tail = kept.takeLast(MERGE_WINDOW)
+        val end = Chat.alignEnd(tail, screen) ?: return screen
+        // The screen's first line sits at this index of the tail.
+        val first = tail.size - 1 - end
+        if (first <= 0) return screen
+        return tail.subList(maxOf(0, first - (n - screen.size)), first) + screen
+    }
 
     // ---- cutting it up for the model ----
 

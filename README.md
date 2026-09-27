@@ -139,7 +139,7 @@ Score answers carry their meaning ("3 / 4 · today", "5 / 6 · risky"), not just
 |---|---|
 | More / Less | expand shows "what kind of chat" and "answer now?" and lays out the deep analysis in full |
 | Think | one deep pass through DeepSeek on OpenRouter: what they care about, the trap in this step, a concrete next move |
-| Reply | three reply drafts in **your own way of speaking**; tap one to put it into the (empty) reply box, long-press to copy. Nothing is ever sent for you |
+| Reply | a one-line read of the moment (whose turn it is, where to take it) and three different drafts in **your own way of speaking**; when your message is the last one they are follow-ups, or the read says to wait. Tap one to put it into the (empty) reply box, long-press to copy. Nothing is ever sent for you |
 | Learn | read and keep your whole history with this person and write a detailed profile (see "Learn this person") |
 | ⋯ | re-check this screen, who they are to you and how close, rename, pause 1 hour, pause this chat, settings |
 | ✕ | back to the bubble |
@@ -238,7 +238,9 @@ count, and the app pages up through **the whole history** by itself, about a pag
 little slower where it has to use OCR). Each page's new lines are joined onto the front, aligned
 by the overlap between pages rather than by de-duplicating text, so "ok" sent thirty times stays
 thirty messages. It stops at the first message (five pages in a row with nothing new); tap the
-bubble to stop early and keep what was read. Keep the screen on and the chat open while it runs.
+bubble to stop early and keep what was read. Keep the chat open while it runs; the screen stays on
+by itself while the history is read and the profile is written, because Android cuts off a
+background app's network once the screen goes off.
 
 What was read is kept on the phone (app-private storage, one file per chat) and topped up with
 new messages as you chat. The next Learn only reads back until it meets what is kept, so it
@@ -246,8 +248,10 @@ takes seconds. Tools → People → More… deletes a kept history; forgetting a
 
 Then the profile. A long history is sent to your OpenRouter model in stretches of about 12,000
 characters, three at a time: notes on each stretch, then one profile from all the notes. Notes
-are cached by the stretch's content, so a later Learn pays only for what is new. The card shows
-how far it has got. The profile starts with what they are to you and how close you are, then
+are cached by the stretch's content and saved as each one lands, so a later Learn pays only for
+what is new. The card shows how far it has got. Each call is tried again after a pause if the
+connection drops, and a write that still loses its connection carries on by itself when you are
+back in that chat. The profile starts with what they are to you and how close you are, then
 sections: who they are, how you get along, how they talk, how you talk to them (both with
 quotes), likes, dislikes, what you talk about, running jokes, things that happened, sore spots,
 and what helps when they are down. The message counts and speaking style are recomputed from
@@ -338,8 +342,13 @@ with what is actually on screen.
   new will leak into the context.
 - No view ids are used anywhere (WeChat renames them every release): only TextView + text +
   screen position + long-clickability.
-- Judging sees only **messages visible on screen**, at most the last 12. A whole history is
-  read and kept only for people you learn.
+- Judging sees only **messages visible on screen**, at most the last 12. Deep reads and reply
+  drafts see up to 30, taking the lines before the screen from the saved history of people you
+  have learned. A whole history is read and kept only for people you learn.
+- Not messages, whatever they say: a row of short texts side by side (Soul's quick replies
+  下午好 / 礼物 / 桌球 / 比心 / 猜拳 above the reply box, toolbars, reactions), anything at or below
+  the reply box (a send button, the draft being typed, wherever the keyboard has pushed it), and
+  what sits in the title bar (the unread count on the back button, Soul's 加速).
 - Learning reads what the chat shows as text: pictures, stickers, voice messages and files are
   not in it, and a long run of them can look like the top of the history and end the read early
   (tap Learn again; it continues). WeChat's own search and dates are not used, so the kept history
