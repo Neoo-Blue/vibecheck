@@ -4,6 +4,19 @@ APKs for every version are on the [releases page](https://github.com/Neoo-Blue/v
 Each section below is also that release's notes: the Release workflow publishes the section whose
 heading matches the tag.
 
+## 6.7.1
+
+**Updates install over the previous version from now on.** Every release until now was signed
+with a key made for that build alone, so Android refused to install one over another ("App not
+installed") and the only way forward was to uninstall, losing the saved keys and people memory.
+From 6.7.1 on, all releases are signed with one fixed key and update in place.
+
+Coming from 6.7.0 or earlier, this needs one last uninstall: in the old version, Tools → Backup →
+Export first; uninstall; install 6.7.1; Tools → Backup → Import, add the keys again and switch the
+accessibility service on. Same features as 6.7.0.
+
+中文：从 6.7.1 起所有版本都用同一个固定签名，以后新版可以直接覆盖安装升级。之前每个版本的签名都不一样，所以会提示「App not installed」，只能卸载重装。从 6.7.0 或更早的版本升级还需要最后一次卸载：先在旧版「工具 → 备份」导出，卸载，装 6.7.1，再「导入」，重新填 Key、打开无障碍服务。功能和 6.7.0 相同。
+
 ## 6.7.0
 
 **Learn this person now learns everything.** It reads your whole history with them (no more

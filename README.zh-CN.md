@@ -291,7 +291,11 @@ ANDROID_HOME=~/android-sdk ./gradlew --no-daemon testDebugUnitTest assembleDebug
 **发版。** 改 `app/build.gradle.kts` 里的 `versionCode` / `versionName`，在 `CHANGELOG.md` 里加上这个版本的一节，
 合并到 `master`：Release 工作流发现这个版本还没发布，就会跑测试、编译 `vibecheck-<版本>.apk`，并以那一节为说明发布。
 推送标签 `v<versionName>` 或手动运行工作流也可以（会替换已有版本的 APK）。
-想用之前版本的签名（这样可以直接覆盖升级），把那个 `debug.keystore` 的 base64 设为仓库 secret `DEBUG_KEYSTORE_BASE64`。
+
+**签名。** 从 6.7.1 起所有版本都用同一个签名 `app/signing/release.p12`，新版可以直接覆盖安装旧版。这个文件是加密的
+（AES-256，密码是一串很长的随机字符），没有密码就没用；密码是仓库 secret `RELEASE_KEY_PASSWORD`。没有这个 secret，
+Release 工作流就不发布（不会发出一个没法覆盖升级的 APK），发布前还会核对 APK 的证书（SHA-256 `d364f1fb…29f1b017`）。
+本地想编出同样签名的包，在环境变量里设 `RELEASE_KEY_PASSWORD`；不设的话 `assembleRelease` 用 debug 签名，装不到正式版上面。
 
 `Chat.kt`、`Jev.kt`、`Person.kt`、`Relation.kt`、`Learner.kt` 不依赖 Android：气泡识别、系统消息过滤、
 两步判断的问题集、卡片渲染、bandit 更新与合并、翻页对齐，以及防止被动统计重复计数的对齐，都在 `app/src/test/` 下有单元测试。
