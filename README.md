@@ -324,6 +324,33 @@ When Li on WeChat and Sam on Messenger are the same person, open People → Li �
 are folded together (arms pool their samples, the danger bias is weighted by how much each side
 learned), and from then on either chat opens the same memory.
 
+## About me (learned across every chat)
+
+Besides each person, the app learns about **you**, across all your chats (Setup → Behaviour →
+Learn about me, on by default):
+- **Day log.** What is said as it happens in any watched chat, yours and theirs, is logged by day
+  with the time and whose chat it was, on the phone. Lines that only look new because a chat was
+  opened after a while are not logged.
+- **Day write-ups.** Each finished day is written up in a few lines by the Think model: what you
+  did, where you went, who you talked with about what, plans made, how you felt. "Write up
+  today" does it for today so far.
+- **Profile of you.** Whenever someone is learned, the newest stretches of that history are
+  also read for what they show about you (cached, like a person's notes). Those notes, your
+  recent days and the people in your life are merged into one profile: who you are, how you talk
+  (specific enough to imitate, and how it differs between people), what you like and dislike,
+  what you have been busy with, what you care about, and the people in your life.
+
+It shows as **Me** at the top of the People tab. Its page has:
+- the profile, section by section;
+- every day written up;
+- how you write across chats;
+- buttons to write the profile again or delete everything learned about you.
+
+Reply drafts and deep reads get a short brief of it: how you talk, who you are, what you have
+been busy with, what you like, the last three days, and what you said in other chats today. So
+a draft can mention that you only just got off work, in your own words. The model is told to use
+only what is written there and invent nothing.
+
 ## Debugging while it runs
 
 Enable "LAN debug endpoint" under Tools → Diagnostics and any computer on the same Wi-Fi can read
@@ -392,7 +419,9 @@ memory (the last 40) to name emoji-only contacts, and never stored or sent anywh
 Chat text goes to `api.typesafe.ai` for judging (or to `openrouter.ai` if you chose that
 engine) and, when you press the buttons, to `openrouter.ai`. **Learning a person sends their
 whole history to your OpenRouter model** to write the profile, and reply drafts send a few past
-exchanges with them. API keys and learning state live in the app's private SharedPreferences;
+exchanges with them. With Learn about me on, the day log keeps what is said in every watched chat
+on the phone for 90 days. Each day's log is sent to the Think model to be written up. Reply drafts
+also carry what you said in other chats today. Turn it off, or delete it all from the Me page. API keys and learning state live in the app's private SharedPreferences;
 kept histories are files in app-private storage, not included in Backup exports.
 The debug endpoint is LAN-only and token-gated but can read chat content: do not enable it on
 public Wi-Fi. This is a personal tool for your own phone and your own conversations.

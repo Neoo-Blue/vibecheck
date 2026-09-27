@@ -4,6 +4,41 @@ APKs for every version are on the [releases page](https://github.com/Neoo-Blue/v
 Each section below is also that release's notes: the Release workflow publishes the section whose
 heading matches the tag.
 
+## 6.8.0
+
+**It learns about you too, across every chat.** Setup → Behaviour → Learn about me, on by default.
+- **A day log.** What is said as it happens in any watched chat is logged by day on the phone,
+  with the time and whose chat it was.
+- **Day write-ups.** Each finished day is written up in a few lines: what you did, where you went,
+  who you talked with, plans made, how you felt. Today can be written up on demand.
+- **A profile of you.** Whenever someone is learned, their history is also read for what it shows
+  about you. That is merged with your recent days and the people in your life into one profile:
+  who you are, how you talk and how that differs between people, likes and dislikes, what you
+  have been busy with, what you care about, and the people around you.
+- **Me, on the People tab.** It sits at the top, and its page has:
+  - the profile, section by section;
+  - every day written up;
+  - how you write across chats;
+  - buttons to write it again or delete it.
+- **In replies.** Reply drafts and deep reads now draw on how you talk, who you are, what you have
+  been busy with, your last three days and what you said in other chats today. They are told to
+  use only that and invent nothing.
+
+The log stays on the phone for 90 days; each day is sent to the Think model to be written up.
+
+中文：
+- **跨所有聊天学你自己**（「设置 → 行为 → 了解我」，默认开）：
+  - **每天的记录**：每个监听的聊天里实时出现的消息，按天记在手机上，带时间和是哪个聊天；
+  - **每天的小结**：过完一天写成几行，你做了什么、去了哪、和谁聊了什么、定了什么计划、心情怎么样，今天的也可以随时点「总结今天」；
+  - **关于你的档案**：每学习一个人，也会从你们的聊天里挑出关于你的事，再和最近每天的小结、你身边的人合成一份：你是谁、你怎么说话（对不同的人有什么不同）、喜欢和不喜欢、最近在忙什么、在意什么、身边有哪些人。
+- **「人物」页最上面有「我」**，点进去是：
+  - 分段的档案；
+  - 每天的小结；
+  - 你在各个聊天里的说话方式；
+  - 重新整理和清空的按钮。
+- **回复用上了你**：回复草稿和深思会参考你怎么说话、你是谁、最近在忙什么、最近三天和今天在别的聊天里说过的话。只用写着的，不编。
+- **隐私**：记录在手机上存 90 天，每天的记录会发给深思模型写小结。
+
 ## 6.7.4
 
 **People get a tab of their own.** Everyone remembered is on the new People tab. Each card shows:
