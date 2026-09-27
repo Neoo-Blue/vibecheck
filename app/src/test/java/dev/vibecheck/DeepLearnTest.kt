@@ -236,3 +236,30 @@ class EmojiLabelTest {
         assertNull("a speck is not a name", Person.nameBox(speck, w, h))
     }
 }
+
+class NameSourceTest {
+
+    private val win = Chat.Box(0, 0, 1080, 2000)
+    private fun at(text: String, x: Int) = text to Chat.Box(x - 40, 120, x + 40, 160)
+
+    @Test fun aGenericAvatarLabelIsNobodysName() {
+        // Soul: the name reads "...", then "在线" and the unread count; every avatar says "Souler".
+        val titles = listOf(at("38", 90), at("...", 155), at("在线", 200))
+        assertEquals("...", Person.peerName(titles, listOf("Souler头像"), win, symbols = true))
+        assertNull("OCR reads an emoji as a stray mark: no mark-only names there",
+            Person.peerName(titles, listOf("Souler头像"), win, symbols = false))
+        assertNull(Person.peerName(listOf(at("在线", 200)), listOf("Souler头像", "对方头像"), win, symbols = true))
+    }
+
+    @Test fun realAvatarLabelsAndTitlesStillWin() {
+        assertEquals("欧欧", Person.peerName(listOf(at("在线", 200)), listOf("欧欧头像"), win))
+        assertEquals("小李", Person.peerName(listOf(at("在线", 200)), listOf("小李的头像"), win))
+        assertEquals("欧欧🌸", Person.peerName(listOf(at("...", 155), at("欧欧🌸", 540)), listOf("Souler头像"), win, symbols = true))
+    }
+
+    @Test fun marksAreANameOnlyWithoutDigits() {
+        for (n in listOf("...", "。", "～～", "-_-")) assertTrue(n, Person.looksLikeSymbolName(n))
+        for (n in listOf("38", "12:30", "5%", "", "在线", "对方正在输入...", "Souler")) assertFalse(n, Person.looksLikeSymbolName(n))
+        assertFalse(Person.looksLikeName("Souler"))
+    }
+}

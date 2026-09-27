@@ -17,6 +17,10 @@ object Person {
         "Messenger", "Messages", "WhatsApp", "Telegram", "Instagram", "LINE", "Signal", "Discord",
         "Snapchat", "QQ", "KakaoTalk", "Viber", "X", "Teams", "Slack", "Calls", "Stories", "People",
         "Back", "Home", "New message", "New chat", "Select contact", "Chat",
+        // What apps call anyone: Soul labels every avatar "Souler", and taking that for a name
+        // filed every Soul chat under one person.
+        "Souler", "Soulmate", "匿名", "匿名用户", "神秘人", "用户", "对方", "好友", "联系人", "未知",
+        "Unknown", "User", "TA", "Ta", "ta",
     )
 
     /** The presence line under a name in a chat header: WhatsApp, Telegram, Messenger, Instagram. */
@@ -37,14 +41,40 @@ object Person {
      * window; the title is the one nearest the horizontal center. Falls back to an avatar's
      * content description, which WeChat sets to "<名字>头像".
      */
-    fun peerName(titles: List<Pair<String, Chat.Box>>, avatarDescs: List<String>, win: Chat.Box): String? {
+    fun peerName(
+        titles: List<Pair<String, Chat.Box>>,
+        avatarDescs: List<String>,
+        win: Chat.Box,
+        /** Accept a name made only of marks ("...", "。"): true where the app gives text, never for OCR, which reads an emoji as a stray mark. */
+        symbols: Boolean = false,
+    ): String? {
         val center = (win.left + win.right) / 2
         val title = titles
             .filter { looksLikeName(it.first) }
             .minByOrNull { kotlin.math.abs(it.second.centerX - center) }
         if (title != null) return title.first.trim()
-        return avatarDescs.firstOrNull { it.endsWith("头像") && it.length > 2 }
-            ?.removeSuffix("头像")?.trim()
+        avatarDescs.asSequence()
+            .filter { it.endsWith("头像") }
+            .map { it.removeSuffix("头像").trim().removeSuffix("的").trim() }
+            .firstOrNull { it.isNotEmpty() && (looksLikeName(it) || (symbols && looksLikeSymbolName(it))) }
+            ?.let { return it }
+        if (!symbols) return null
+        return titles
+            .filter { looksLikeSymbolName(it.first) }
+            .minByOrNull { kotlin.math.abs(it.second.centerX - center) }
+            ?.first?.trim()
+    }
+
+    /**
+     * "...", "。", "～～": a name made of marks, which some people really choose (Soul is full of
+     * them). Taken only when nothing in the title bar reads as an ordinary name, and never with a
+     * digit in it: unread counts, clocks and battery levels are all digits.
+     */
+    fun looksLikeSymbolName(raw: String): Boolean {
+        val s = raw.trim()
+        if (s.isEmpty() || s in TITLE_JUNK || SUBTITLE.matches(s) || TYPING.matches(s)) return false
+        val cps = s.filterNot { it.isWhitespace() }.codePoints().toArray()
+        return cps.size in 1..12 && cps.none { Character.isDigit(it) }
     }
 
     /**

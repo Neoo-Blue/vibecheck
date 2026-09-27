@@ -205,6 +205,9 @@ are fine where the app gives text. OCR (WeChat, Telegram) cannot see emoji at al
   puts the emoji back on names OCR read only in part ("欧欧" becomes "欧欧🌸").
 - ⋯ → Rename on the card names anyone by hand (type or paste emoji); your name always wins.
 - A "typing…" indicator in place of the name is not taken for one.
+- Labels apps put on anyone ("Souler" on every Soul avatar, 对方, 用户) are never a name; a name made
+  only of marks ("...", "。") counts where the app gives text. Debug mode lists the title bar's
+  texts and avatar labels, which shows why a name was or was not read.
 
 | stored | from | used as |
 |---|---|---|

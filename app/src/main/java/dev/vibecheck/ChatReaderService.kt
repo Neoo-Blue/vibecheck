@@ -486,6 +486,9 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         while (stack.isNotEmpty() && visited < MAX_NODES) {
             val n = stack.removeLast()
             visited++
+            // Hidden views (and whatever is inside them) are not on screen: a hidden label in the
+            // title bar is no one's name, and a message scrolled out of the list is not on show.
+            if (!n.isVisibleToUser) continue
             n.contentDescription?.toString()?.let { if (it.endsWith("头像")) descs.add(it) }
             if (!input && n.isEditable) {
                 // A text field along the bottom is a reply box; chat lists keep their search at the top.
@@ -546,7 +549,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         // together under one "unknown" record.
         // A name hidden by typing is not an unreadable one: no fingerprint for it, or a contact
         // with a perfectly good name would be filed under a stray fingerprint record.
-        val name = Person.peerName(lastTitles, lastDescs, lastWindow)
+        val name = Person.peerName(lastTitles, lastDescs, lastWindow, symbols = !viaOcr)
             ?: (if (Person.isTyping(lastTitles)) lastPeerName?.takeIf { activeId != null } else unreadableName())
             ?: UNKNOWN
         lastPeerName = name
@@ -840,10 +843,15 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     private fun debugCard(bubbles: List<Chat.Bubble>) {
         // Always draw in debug mode, even with nothing left after filtering: a blank screen
         // cannot tell you whether the service is dead, blocked, or just over-filtering.
-        val lines = if (bubbles.isEmpty()) listOf(lastCounts, L.t("窗口 ", "window ") +
+        val read = if (bubbles.isEmpty()) listOf(lastCounts, L.t("窗口 ", "window ") +
             "${lastWindow.left},${lastWindow.top}-${lastWindow.right},${lastWindow.bottom}")
         else bubbles.takeLast(4).map { (if (it.incoming) L.t("对方: ", "them: ") else L.t("我: ", "me: ")) + it.text.take(24) }
-        val who = Person.peerName(lastTitles, lastDescs, lastWindow) ?: L.t("认不出是谁", "unknown contact")
+        // Where the name comes from, so a misread one can be told apart from a missing one.
+        val lines = read + listOfNotNull(
+            L.t("标题栏：", "Title bar: ") + lastTitles.joinToString(" | ") { it.first.take(16) }.ifEmpty { "—" },
+            lastDescs.takeIf { it.isNotEmpty() }?.let { d -> L.t("头像描述：", "Avatar labels: ") + d.distinct().take(3).joinToString(" | ") { it.take(16) } },
+        )
+        val who = Person.peerName(lastTitles, lastDescs, lastWindow, symbols = !viaOcr) ?: L.t("认不出是谁", "unknown contact")
         val where = if (Chat.inConversation(bubbles, hasInput)) L.t("聊天页", "a chat") else L.t("不是聊天页", "not a chat")
         cardFor = null
         cardShows = null
