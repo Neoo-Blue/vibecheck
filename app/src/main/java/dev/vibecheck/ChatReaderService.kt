@@ -165,6 +165,8 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     /** The chat's own id: its history file, which a linked person's other chats do not share. */
     private var learnOwn = ""
     private var learnPkg = ""
+    /** Their name as the title bar shows it: quotes of their messages start with it. */
+    private var learnName = ""
     private val learnHistory = ArrayList<Pair<String, String>>()   // oldest first
     private var learnScrolls = 0
     private var learnStale = 0
@@ -452,7 +454,10 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                 // throw away real messages that the card merely covers.
                 val ime = imeBox()
                 val exclude = if (shot.windowOnly) emptyList() else listOfNotNull(card.bounds(), ime)
-                val (found, titles) = Chat.fromOcr(placed, win, exclude, Chat.replyRowAbove(ime, win))
+                val (found, titles) = Chat.fromOcr(
+                    placed, win, exclude, Chat.replyRowAbove(ime, win),
+                    resources.displayMetrics.density, pixelSide(shot.bmp, win, over + exclude),
+                )
                 val covered = Person.titleCovered(over + exclude, win)
                 val avatar = avatarPrint(shot.bmp, win, found, over + exclude)?.let { Person.hashOf(it) }.orEmpty()
                 val title = if (covered) "" else Person.hashOf(titlePrint(shot.bmp))
@@ -487,6 +492,9 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         val descs = ArrayList<String>()
         val texts = ArrayList<Pair<String, Chat.Box>>()
         val longClick = ArrayList<Boolean>()
+        // Avatars along the edges: beside a message whose margins leave its side open, they settle it.
+        val avatars = ArrayList<Chat.Box>()
+        val dp = resources.displayMetrics.density
         var input: Chat.Box? = null
         val h = win.bottom - win.top
         val statusBar = win.top + h * 0.035
@@ -517,12 +525,17 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                 texts.add(text to box)
                 longClick.add(n.isLongClickable)
                 if (box.top >= statusBar && box.top <= titleBand) titles.add(text to box)  // name band
+            } else if (text.isEmpty() && ("Image" in cls || "Avatar" in cls || n.contentDescription?.endsWith("头像") == true)) {
+                val r = Rect().also { n.getBoundsInScreen(it) }
+                val box = Chat.Box(r.left, r.top, r.right, r.bottom)
+                if (Sides.isAvatar(box, win, dp)) avatars.add(box)
             }
             for (i in 0 until n.childCount) n.getChild(i)?.let { stack.addLast(it) }
         }
         // Messages only: not the title bar, not a strip of quick replies, nothing in the compose area.
-        val keep = Chat.messageIndices(texts, win, input)
-        val found = keep.map { i -> Chat.Bubble(texts[i].first, Chat.isIncoming(texts[i].second, win), texts[i].second) }
+        val keep = Chat.messageIndices(texts, win, input).sortedBy { texts[it].second.top }
+        val theirs = Chat.sides(keep.map { texts[it].second }, win, dp) { Sides.byAvatars(it, avatars) }
+        val found = keep.mapIndexed { j, i -> Chat.Bubble(texts[i].first, theirs[j], texts[i].second) }
         val longClickable = keep.filter { longClick[it] }.mapTo(HashSet()) { texts[it].first }
         lastWindow = win
         lastTitles = titles
@@ -539,13 +552,13 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
 
     // ---- deciding what the card says ----
 
-    private fun handle(bubbles: List<Chat.Bubble>) {
+    private fun handle(read: List<Chat.Bubble>) {
         unsettled = false
         Diag.lastScan = lastCounts + L.t("；最后一条：", "; newest: ") +
-            (bubbles.lastOrNull()?.let { (if (it.incoming) L.t("对方 ", "them ") else L.t("我 ", "me ")) + it.text.take(30) } ?: L.t("无", "none"))
+            (read.lastOrNull()?.let { (if (it.incoming) L.t("对方 ", "them ") else L.t("我 ", "me ")) + it.text.take(30) } ?: L.t("无", "none"))
 
-        if (prefs.debug) { debugCard(bubbles); return }
-        if (bubbles.isEmpty()) {
+        if (prefs.debug) { debugCard(read); return }
+        if (read.isEmpty()) {
             // Nothing read at all (a failed capture, a frame caught mid-animation) says nothing
             // about where we are: put the card away for now, but this is not leaving the chat,
             // or the next screen would count as freshly opened and its history as new messages.
@@ -553,7 +566,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             return
         }
         // The chat list is also full of names and text; judging it would be nonsense.
-        if (onHomeScreen || !Chat.inConversation(bubbles, hasInput)) {
+        if (onHomeScreen || !Chat.inConversation(read, hasInput)) {
             activeId = null
             card.hide()
             return
@@ -569,6 +582,9 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             ?: (if (Person.isTyping(lastTitles)) lastPeerName?.takeIf { activeId != null } else unreadableName())
             ?: UNKNOWN
         lastPeerName = name
+        // Their message quoted under my reply is their words, not mine.
+        val bubbles = if (name == UNKNOWN || Person.isFingerprint(name)) read else Chat.withoutQuotes(read, name)
+        if (bubbles.isEmpty()) { card.suspend(); return }
         val record = people.load(targetPkg, name)
         val id = record.id
         // Someone known only by a fingerprint: the picture of their name is how they are shown.
@@ -1278,6 +1294,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         learnId = rec.id
         learnOwn = rec.own
         learnPkg = targetPkg
+        learnName = rec.name
         learnHistory.clear()
         learnScrolls = 0
         learnStale = 0
@@ -1318,7 +1335,9 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             if (!learning) return@captureBubbles
             // Within a page bubbles run oldest→newest; a page reached by scrolling up is older
             // than everything already kept, so what is not in the overlap goes to the front.
-            val page = bubbles.map { (if (it.incoming) "对方" else "我") to it.text }
+            // Their message quoted under my reply is theirs: left out, not kept as mine.
+            val shown = if (Person.isFingerprint(learnName)) bubbles else Chat.withoutQuotes(bubbles, learnName)
+            val page = shown.map { (if (it.incoming) "对方" else "我") to it.text }
             val fresh = Chat.freshLines(learnHistory, page)
             learnHistory.addAll(0, fresh)
             if (fresh.isEmpty()) learnStale++ else learnStale = 0
@@ -1628,13 +1647,36 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         captureChat(hideOverlay = false) { shot, _ ->
             if (shot == null) { main.post { cb(emptyList()) }; return@captureChat }
             val win = shot.box
+            val over = if (shot.windowOnly) emptyList() else overlays()
             Ocr.read(shot.bmp) { items ->
-                shot.bmp.recycle()
                 val placed = items.map { (text, b) -> text to Chat.Box(b.left + win.left, b.top + win.top, b.right + win.left, b.bottom + win.top) }
                 val ime = imeBox()
                 val exclude = if (shot.windowOnly) emptyList() else listOfNotNull(card.bounds(), ime)
-                cb(Chat.fromOcr(placed, win, exclude, Chat.replyRowAbove(ime, win)).first)
+                // The pixels are read while sides are decided, so the picture goes only after.
+                val found = Chat.fromOcr(
+                    placed, win, exclude, Chat.replyRowAbove(ime, win),
+                    resources.displayMetrics.density, pixelSide(shot.bmp, win, over + exclude),
+                ).first
+                shot.bmp.recycle()
+                cb(found)
             }
+        }
+    }
+
+    /**
+     * Whose a text on a capture is, from the pixels beside it (see [Sides]): rows through its first
+     * and last lines, where an avatar sits. A row that anything else is drawn across (our card, the
+     * keyboard, a notification) is left out. Only asked about texts whose margins leave it open.
+     */
+    private fun pixelSide(bmp: Bitmap, win: Chat.Box, covered: List<Chat.Box>): (Chat.Box) -> Int {
+        val dp = resources.displayMetrics.density
+        return { box ->
+            runCatching {
+                val rows = Sides.rowsFor(box.top - win.top, box.bottom - win.top, bmp.height, dp)
+                    .filter { y -> covered.none { y + win.top >= it.top && y + win.top < it.bottom } }
+                    .map { y -> IntArray(bmp.width).also { bmp.getPixels(it, 0, bmp.width, 0, y, bmp.width, 1) } }
+                Sides.blockSide(rows, box.left - win.left, box.right - win.left, dp)
+            }.getOrDefault(Sides.UNKNOWN)
         }
     }
 

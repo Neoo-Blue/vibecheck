@@ -87,10 +87,33 @@ object Chat {
         RegexOption.IGNORE_CASE,
     )
 
-    /** WeChat toasts, call stubs, reactions and system notices are not conversation. */
+    /** What OCR makes of the phone or camera icon beside a call record: a stray mark or a letter. */
+    private const val ICON = """([^\p{L}\p{N}\s]{1,2}|[CcLlOoQqUuGg])"""
+
+    /**
+     * A call record, in a bubble on the caller's side: WeChat's 「已取消」「对方已取消」「对方无应答」
+     * 「通话时长 03:12」, "Canceled", "Call declined". Only as the whole text, so 「我已经取消了」 and
+     * "I canceled" are messages.
+     */
+    private val CALL_ROW = Regex(
+        """($ICON\s*)?(""" +
+            """(对方)?(已取消|已拒绝|已挂断|未接听|无应答|已在其他设备接听)|对方(忙线中?|正忙)|忙线未接听|无人接听|连接失败|""" +
+            """(语音|视频)?通话(已)?(取消|结束|中断)|(通话|聊天)时长\s*\d{1,2}:\d{2}(:\d{2})?|""" +
+            """((voice |video )?call )?(canceled|cancelled|declined|unanswered|not answered|no answer)""" +
+            """( by (the )?(caller|callee|other party))?|""" +
+            """(call|line) busy|(voice |video )?call (ended|failed|missed)|(call )?duration:?\s*\d{1,2}:\d{2}(:\d{2})?|""" +
+            """connection failed|(answered|declined) on (another|other) device""" +
+            """)(\s*$ICON)?[.!。]?""",
+        RegexOption.IGNORE_CASE,
+    )
+
+    /** The length printed beside a voice message: 5", 12″, 59”. */
+    private val VOICE = Regex("""\d{1,2}\s*(["″”“]|'')""")
+
+    /** WeChat toasts, call records, voice lengths, reactions and system notices are not conversation. */
     fun isNotification(text: String): Boolean {
         val t = text.trim()
-        return SYSTEM_PHRASE.containsMatchIn(t) || SYSTEM_ROW.matches(t)
+        return SYSTEM_PHRASE.containsMatchIn(t) || SYSTEM_ROW.matches(t) || CALL_ROW.matches(t) || VOICE.matches(t)
     }
 
     fun isChrome(box: Box, text: String, win: Box): Boolean {
@@ -171,26 +194,84 @@ object Chat {
      */
     fun isIncoming(box: Box, win: Box): Boolean = (box.left - win.left) <= (win.right - box.right)
 
+    /** How far a text leans to one side: its left margin less its right one, over the window width. */
+    private fun lean(box: Box, win: Box): Float =
+        ((box.left - win.left) - (win.right - box.right)).toFloat() / win.width.coerceAtLeast(1)
+
+    /**
+     * Whose each message is (true: theirs), for [boxes] in order down the screen.
+     *
+     * Most messages sit clearly to one side, and their margins decide. A text that nearly fills
+     * the width of a bubble reads the same both ways: the widest bubbles of both sides leave the
+     * same margins in WeChat, and the ragged end of the text tipped my long messages to them. Then
+     * [seen] decides, from the avatar or bubble drawn beside it ([Sides], -1 left, 1 right, 0 not
+     * known), and failing that the margins do.
+     *
+     * A text right under another, overlapping it, is in the same bubble or card: the lines of a
+     * link card below its title (left-aligned inside a card of mine, so their margins say
+     * "theirs"), a message OCR cut in two. It takes the side of the text above when the pixels
+     * settled that one, and when nothing else settles its own. [dp] is pixels per dp.
+     */
+    fun sides(boxes: List<Box>, win: Box, dp: Float, seen: (Box) -> Int): List<Boolean> {
+        val out = ArrayList<Boolean>(boxes.size)
+        // Whether each side was settled by the pixels, directly or through the text above.
+        val settled = ArrayList<Boolean>(boxes.size)
+        for ((i, box) in boxes.withIndex()) {
+            val lean = lean(box, win)
+            val prev = boxes.getOrNull(i - 1)
+            val under = prev != null && box.top - prev.bottom <= SAME_BUBBLE_DP * dp &&
+                prev.left < box.right && box.left < prev.right
+            if (under && settled[i - 1]) { out += out[i - 1]; settled += true; continue }
+            if (abs(lean) >= CLEAR_LEAN) { out += lean < 0; settled += false; continue }
+            when (seen(box)) {
+                Sides.LEFT -> { out += true; settled += true }
+                Sides.RIGHT -> { out += false; settled += true }
+                else -> { out += if (under) out[i - 1] else lean <= 0; settled += false }
+            }
+        }
+        return out
+    }
+
+    /** Leaning this far, a text's side is plain from its margins alone. */
+    private const val CLEAR_LEAN = 0.12f
+    /** Texts closer than this, one under the other, are in one bubble or card: separate messages are further apart. */
+    private const val SAME_BUBBLE_DP = 14f
+
     /**
      * Build bubbles from OCR blocks. Same geometry rules as the node-tree path, plus exclusion
      * rectangles for everything on screen that is not the conversation: our own card (or it
-     * reads its own output back) and the keyboard (or every key becomes a message).
+     * reads its own output back) and the keyboard (or every key becomes a message). [seen] is
+     * what the pixels beside a text say about whose it is (see [sides]).
      */
     fun fromOcr(
         items: List<Pair<String, Box>>,
         win: Box,
         exclude: List<Box>,
         input: Box? = null,
+        dp: Float = 2.75f,
+        seen: (Box) -> Int = { Sides.UNKNOWN },
     ): Pair<List<Bubble>, List<Pair<String, Box>>> {
         val h = (win.bottom - win.top)
         // Between the status bar and the end of the title bar. The status bar is where the clock
         // and icons live, and OCR turns those into convincing-looking garbage.
         val titles = items.filter { it.second.top >= win.top + h * 0.035 && it.second.top < win.top + h * 0.07 }
         val visible = items.filterNot { item -> exclude.any { overlaps(item.second, it) } }
-        val bubbles = messageIndices(visible, win, input)
-            .map { visible[it] }
-            .map { Bubble(it.first, isIncoming(it.second, win), it.second) }
+        val kept = messageIndices(visible, win, input).map { visible[it] }.sortedBy { it.second.top }
+        val theirs = sides(kept.map { it.second }, win, dp, seen)
+        val bubbles = kept.mapIndexed { i, (text, box) -> Bubble(text, theirs[i], box) }
         return order(bubbles) to titles
+    }
+
+    /**
+     * WeChat shows a quoted message under the reply, on the replier's side: 「名字：原话」. Their
+     * words quoted under my reply read as mine, so a text that starts with their name and a colon
+     * is a quote, not a message. [peer] is the name in the title bar.
+     */
+    fun withoutQuotes(bubbles: List<Bubble>, peer: String): List<Bubble> {
+        val name = peer.trim()
+        if (name.isEmpty()) return bubbles
+        val quote = Regex("""^\s*${Regex.escape(name)}\s*[：:]\s*\S""")
+        return bubbles.filterNot { quote.containsMatchIn(it.text) }
     }
 
     /**

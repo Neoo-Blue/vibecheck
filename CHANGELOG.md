@@ -4,6 +4,33 @@ APKs for every version are on the [releases page](https://github.com/Neoo-Blue/v
 Each section below is also that release's notes: the Release workflow publishes the section whose
 heading matches the tag.
 
+## 6.8.1
+
+**Who said what, read right.**
+- **Long messages go to the right person.** A message that nearly fills the width sits the same
+  from both sides: WeChat's widest bubbles leave equal margins, and the ragged end of the text
+  tipped long messages of mine to them. When the margins can't tell, the avatar or bubble drawn
+  beside the text now decides, by whichever edge of the window it is clearly nearer. Apps read
+  through the node tree use the avatar level with the message. The lines of a link card follow
+  its title, where the lines under it used to go to them.
+- **Call records are not messages.** WeChat's 已取消, 对方已取消, 已拒绝, 对方无应答, 忙线未接听 and
+  通话时长 03:12 are left out, and so are Canceled, Declined, No answer and Call duration in English,
+  even when OCR reads the phone icon as a stray mark. So are voice-message lengths such as 5".
+- **Quotes.** A quote of their message under my reply (「小雨：周六去爬山吗」) is no longer read as
+  something I said.
+- **Screenshots.** Deep reads and drafts that get a screenshot are told that bubbles on the right
+  are mine and those on the left theirs, and to trust the picture for who said what.
+
+History kept from earlier reads keeps the sides it was read with. To read it again, delete the
+kept history on the person's page and learn them again.
+
+中文：
+- **长消息不再算错人**：一条消息几乎占满一行时，两边看起来一样。微信最宽的气泡左右留白相同，文字右边又参差不齐，所以我发的长消息常被当成对方说的。现在留白分不出来时，看文字旁边的头像或气泡离哪边的屏幕边缘更近。走节点树的应用看和消息同一高度的头像。链接卡片下面几行跟着标题走，不再算成对方的。
+- **通话记录不是消息**：微信的「已取消」「对方已取消」「已拒绝」「对方无应答」「忙线未接听」「通话时长 03:12」，还有英文界面的 Canceled、Declined、No answer、Call duration，都不再当成消息，电话图标被识别成乱码时也一样。语音消息的秒数（如 5"）也不算。
+- **引用**：回复下面引用的 Ta 的原话（「小雨：周六去爬山吗」）不再当成我说的。
+- **截图**：带截图的深思和回复会被告知：右边的气泡是我发的，左边是 Ta 发的，谁说的以截图为准。
+- 以前学习时存下的记录不会自动改正。想重新读，在那个人的页面点「删除聊天记录存档」，再学习一次。
+
 ## 6.8.0
 
 **It learns about you too, across every chat.** Setup → Behaviour → Learn about me, on by default.
