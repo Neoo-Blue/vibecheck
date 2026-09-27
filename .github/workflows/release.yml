@@ -8,9 +8,11 @@ name: Release
 #   - running it by hand with a tag. Running it for an existing release replaces the APK,
 #     e.g. after adding the signing key below.
 #
-# Signing: set the repository secret DEBUG_KEYSTORE_BASE64 to the base64 of the debug.keystore
-# that signed earlier releases (base64 -w0 ~/.android/debug.keystore) and the APK installs over
-# them as an update. Without it Gradle makes a one-off key and the notes say so.
+# Signing: every release is signed with the one key in app/signing/release.p12, so each version
+# installs over the one before. The key file is encrypted; its password is the repository secret
+# RELEASE_KEY_PASSWORD. Without the secret nothing is published: an APK with a one-off key could
+# not be installed over any earlier release. The published APK's certificate is checked against
+# the key's fingerprint below before it goes out.
 
 on:
   push:
@@ -71,22 +73,33 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         if: steps.plan.outputs.skip != 'true'
 
-      - name: Restore the signing key, if there is one
+      - name: Signing key password
         if: steps.plan.outputs.skip != 'true'
         env:
-          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: |
-          if [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
-            mkdir -p ~/.android
-            echo "$DEBUG_KEYSTORE_BASE64" | base64 -d > ~/.android/debug.keystore
-            echo "SIGNING=kept" >> "$GITHUB_ENV"
-          else
-            echo "SIGNING=one-off" >> "$GITHUB_ENV"
+          if [ -z "$RELEASE_KEY_PASSWORD" ]; then
+            echo "::error::The repository secret RELEASE_KEY_PASSWORD is missing (Settings > Secrets and variables > Actions). Without it the APK would get a one-off key and could not be installed over earlier releases, so nothing is published."
+            exit 1
           fi
 
       - name: Unit tests and release APK
         if: steps.plan.outputs.skip != 'true'
+        env:
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: ./gradlew --no-daemon testDebugUnitTest assembleRelease
+
+      - name: Check the APK carries the release key
+        if: steps.plan.outputs.skip != 'true'
+        run: |
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$APKSIGNER" verify --print-certs app/build/outputs/apk/release/app-release.apk | tee certs.txt
+          if ! grep -qi "SHA-256 digest: $RELEASE_CERT_SHA256" certs.txt; then
+            echo "::error::The APK is not signed with the release key (expected certificate SHA-256 $RELEASE_CERT_SHA256)."
+            exit 1
+          fi
+        env:
+          RELEASE_CERT_SHA256: d364f1fbf423b44f5970c5b67ceede64ae8407a22bb1a8c23fedcd1b29f1b017
 
       - name: Publish
         if: steps.plan.outputs.skip != 'true'
@@ -98,13 +111,8 @@ jobs:
           # This version's section of the changelog, without its heading.
           awk -v v="$VERSION" '/^## / { if (found) exit; if ($2 == v) { found = 1; next } } found' CHANGELOG.md > notes.md
 
-          if [ "$SIGNING" = kept ]; then
-            EN="Signed with the same key as earlier releases, so it installs over them as an update."
-            ZH="与之前的版本使用同一个签名，可以直接覆盖安装升级。"
-          else
-            EN="Signed with a key made for this build only, so Android will not install it over an earlier release or a build you made yourself: uninstall that first (this erases the saved keys and people memory)."
-            ZH="这个版本的签名是单独生成的，系统不会让它覆盖安装之前的版本或你自己编译的版本：请先卸载旧版（会清掉保存的 Key 和人物记忆）。"
-          fi
+          EN="Signed with the Vibecheck release key: it installs over 6.7.1 and later as an update, and later versions install over it. Coming from 6.7.0 or earlier (each signed with a one-off key), uninstall once first; export people memory under Tools > Backup before, and import it after."
+          ZH="使用 Vibecheck 固定签名：6.7.1 及以后的版本可以互相直接覆盖升级。从 6.7.0 或更早的版本（每次签名都不同）升级，需要先卸载一次：卸载前在「工具 → 备份」导出人物记忆，装好后导入。"
           {
             echo
             echo "---"

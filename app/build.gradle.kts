@@ -11,14 +11,29 @@ android {
         applicationId = "dev.vibecheck"
         minSdk = 26
         targetSdk = 35
-        versionCode = 44
-        versionName = "6.7.0"
+        versionCode = 45
+        versionName = "6.7.1"
+    }
+
+    // Releases are signed with one fixed key, so each version installs over the one before. The
+    // key is in the repository encrypted (AES-256 under a long random password): without
+    // RELEASE_KEY_PASSWORD, a GitHub secret or a local environment variable, it is useless, and
+    // a build falls back to the debug key, which cannot install over a release.
+    val releasePassword: String? = System.getenv("RELEASE_KEY_PASSWORD")?.takeIf { it.isNotBlank() }
+    signingConfigs {
+        if (releasePassword != null) create("release") {
+            storeFile = file("signing/release.p12")
+            storeType = "pkcs12"
+            storePassword = releasePassword
+            keyAlias = "vibecheck"
+            keyPassword = releasePassword
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug") // sideloaded personal build
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
     compileOptions {

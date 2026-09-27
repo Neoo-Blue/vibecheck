@@ -375,8 +375,15 @@ GitHub Actions runs the same on every push and pull request and uploads the debu
 version to `CHANGELOG.md`, and merge to `master`: the Release workflow sees a version with no release
 yet, runs the tests, builds `vibecheck-<version>.apk` and publishes it with that section as the
 notes. Pushing the tag `v<versionName>` or running the workflow by hand works too (and replaces the
-APK of an existing release). To sign with the key of earlier releases, so they update in place,
-add the base64 of that `debug.keystore` as the repository secret `DEBUG_KEYSTORE_BASE64`.
+APK of an existing release).
+
+**Signing.** Releases from 6.7.1 on are all signed with one key, `app/signing/release.p12`, so each
+installs over the last as an update. The file is encrypted (AES-256 under a long random password) and
+useless without the password, which is the repository secret `RELEASE_KEY_PASSWORD`. Without that
+secret the Release workflow publishes nothing, rather than an APK that could not update anything;
+and it checks the APK's certificate (SHA-256 `d364f1fb…29f1b017`) before publishing. To build a
+release-signed APK locally, set `RELEASE_KEY_PASSWORD` in the environment; without it `assembleRelease`
+signs with the debug key, which will not install over a release.
 
 `Chat.kt`, `Jev.kt`, `Person.kt`, `Relation.kt` and `Learner.kt` do not depend on Android:
 bubble detection, system-row filtering, the two-step question sets, card rendering, bandit
