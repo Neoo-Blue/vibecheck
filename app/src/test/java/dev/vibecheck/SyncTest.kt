@@ -97,6 +97,23 @@ class SyncTest {
         assertTrue(Chat.similar(long, long.dropLast(1) + "！"))
     }
 
+    @Test fun afterAHistoryReadJudgingWaitsForTheNewestMessages() {
+        // Short lines: under five characters only an exact match counts, so no two of these look alike.
+        val read = (1..120).map { if (it % 2 == 0) m("旧$it") else t("旧$it") }
+        val tail = read.takeLast(40)
+        // Left at the top of what was read: old messages, hold.
+        assertFalse(Chat.pastHistory(tail, read, read.take(12)))
+        // Scrolled most of the way down, inside what was counted but short of the end: still old.
+        assertFalse(Chat.pastHistory(tail, read, tail.subList(10, 22)))
+        // The newest counted message is on screen again, with or without something new under it.
+        assertTrue(Chat.pastHistory(tail, read, tail.takeLast(12)))
+        assertTrue(Chat.pastHistory(tail, read, tail.takeLast(11) + t("你还在吗")))
+        // A burst that pushed everything known off the screen is new, not history.
+        assertTrue(Chat.pastHistory(tail, read, (1..12).map { t("刚发来的第${it}条") }))
+        // Nothing counted: nothing to be behind.
+        assertTrue(Chat.pastHistory(emptyList(), read, read.take(12)))
+    }
+
     @Test fun tailSurvivesSaveLoad() {
         val tail = listOf(t("第一行\n第二行"), m("a\tb"), t("ok"))
         val back = Person.loadTail(Person.saveTail(tail))

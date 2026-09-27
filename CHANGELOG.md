@@ -4,6 +4,36 @@ APKs for every version are on the [releases page](https://github.com/Neoo-Blue/v
 Each section below is also that release's notes: the Release workflow publishes the section whose
 heading matches the tag.
 
+## 6.6.1
+
+A friend whose profile said "best friend" could still be judged as a partner (恋爱或亲密关系 91%).
+Three things caused it, and all three are fixed.
+
+- **Each person now has a relationship**: partner, flirting, friend, family, colleague, client,
+  stranger or customer service. "Learn this person" fills it in, and you can choose it on the card
+  (⋯ → Relationship) or under Tools → People. Once it is known, Jev is told instead of asked, so
+  the card can no longer contradict it. Profiles learned before this version are read for it from
+  their first line, so there is no need to learn anyone again.
+- **The question was ambiguous.** The option was called 恋爱或亲密关系 ("romance or intimate
+  relationship"), and close friends are 亲密 too. It is now 恋人或伴侣 (partner), friends explicitly
+  include best friends, and the question asks about the two of you, not the topic: friends talking
+  about a boyfriend are still friends. What was learned under the old name carries over.
+- **An empty context assumed romance.** With no note, profile or general context, every request
+  said "a chat within an intimate relationship". Now nothing is assumed.
+
+Also:
+- After "learn this person" the card is judged again, on the same messages, with what was learned,
+  and the profile stays under it. Changing a relationship or a note does the same.
+- A history read leaves the chat scrolled far up, and those old screens used to be judged as if
+  they were the conversation. Judging now waits until the newest messages are back on screen.
+- A note no longer hides the learned profile: both are sent.
+- Judging the same message again (Re-check included) no longer counts it twice in that person's
+  statistics and history.
+- The setting called "relationship context" is now "general context", with a warning not to
+  describe one person there: it applies to everyone without their own.
+
+中文：修了「档案说是好朋友，卡片却说恋爱或亲密关系 91%」。每个人现在有一个「关系」：学习此人会自动填上，也可以在卡片 ⋯ → 关系、或「工具 → 人物记忆」里手选；知道关系后直接告诉 Jev，不再让它猜，卡片不会再和档案打架。场合选项「恋爱或亲密关系」改成「恋人或伴侣」（好朋友也算「亲密」，容易误判），问题明确问的是你们两个人的关系，不是聊天话题；没有任何背景时不再默认是「亲密关系」。旧档案第一行说得清楚的，直接读出关系，不用重新学。学习完成后按新档案把当前卡片重新判断一次；学习后停在旧记录页时不再把旧消息拿去判断，翻回最新消息再继续；专属背景不再挡掉档案；同一条消息重新判断不再重复计数。
+
 ## 6.6.0
 
 A pass over the whole app: fixes across the service, the card and learning, a new settings layout,

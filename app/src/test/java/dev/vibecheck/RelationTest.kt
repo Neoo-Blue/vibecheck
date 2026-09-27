@@ -75,17 +75,17 @@ class RelationTest {
     @Test fun backoffUsesTheMostSpecificArmWithEvidence() {
         val m = Learner.Model()
         // Four apologies in a romantic context, which went well.
-        repeat(4) { Learner.observe(m, Learner.Episode("恋爱或亲密关系", "在表达不满", "先道歉", 0.9), 0.2) }
+        repeat(4) { Learner.observe(m, Learner.Episode("恋人或伴侣", "在表达不满", "先道歉", 0.9), 0.2) }
 
         // Same situation and intent: the specific arm is used.
-        assertEquals(4, Learner.armFor(m, "恋爱或亲密关系", "在表达不满", "先道歉")!!.n)
+        assertEquals(4, Learner.armFor(m, "恋人或伴侣", "在表达不满", "先道歉")!!.n)
         // Different situation: falls back to what is known about the intent.
         assertEquals("*|在表达不满|先道歉", Learner.keys("客户或生意", "在表达不满", "先道歉")[1])
         assertNotNull(Learner.armFor(m, "客户或生意", "在表达不满", "先道歉"))
         // Unseen intent as well: falls back to the action's general record.
         assertNotNull(Learner.armFor(m, "客户或生意", "在提要求或谈条件", "先道歉"))
         // An action with no history anywhere stays unknown.
-        assertNull(Learner.armFor(m, "恋爱或亲密关系", "在表达不满", "守住边界不让步"))
+        assertNull(Learner.armFor(m, "恋人或伴侣", "在表达不满", "守住边界不让步"))
     }
 
     @Test fun learningIsStillScopedWhereItShouldBe() {

@@ -278,6 +278,19 @@ object Chat {
     }
 
     /**
+     * A history read leaves the chat scrolled far up. Is this page past that history again? Yes
+     * once the newest counted message (the end of [tail]) is on screen, or once the page lines up
+     * with neither what was counted nor what was [read]: then it is something new, like a burst
+     * that arrived meanwhile. With nothing counted there is nothing to be behind.
+     */
+    fun pastHistory(tail: List<Pair<String, String>>, read: List<Pair<String, String>>, page: List<Pair<String, String>>): Boolean {
+        if (tail.isEmpty()) return true
+        val end = alignEnd(tail, page)
+        if (end != null) return end < page.size
+        return alignEnd(read, page) == null
+    }
+
+    /**
      * The page index of the tail's newest line under the best-agreeing offset between the two
      * (page.size or more when the page shows only older, already counted lines), or null when
      * nothing lines up convincingly. An offset needs at least two agreeing lines and 60% of its

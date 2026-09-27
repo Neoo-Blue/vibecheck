@@ -239,10 +239,13 @@ class MainActivity : Activity() {
             addView(switch(L.t("在聊天里顺便记住每个人（只在手机上）", "Remember people while you chat (on this phone only)"), prefs.passive) { prefs.passive = it })
         })
 
-        addView(tile(null, L.t("关系背景", "Relationship context"), L.t(
-            "会随对话一起发给模型。给某个人单独写背景：工具 → 人物记忆。",
-            "Sent to the model with the chat. For one person only: Tools → People.")) {
-            contextField = field(L.t("例：交往两年的女友，最近因为我总忘事在生气", "e.g. girlfriend of two years, annoyed lately because I keep forgetting things"), prefs.context, lines = 2)
+        addView(tile(null, L.t("通用背景", "General context"), L.t(
+            "只发给还没有专属背景、也没学习过的人。别在这里写某一个人（比如对象）：那会被当成所有人的背景。" +
+                "每个人是你的什么人、专属背景：工具 → 人物记忆，或卡片上的 ⋯ → 关系。",
+            "Sent only for people with no context of their own and no profile. Don't describe one person here " +
+                "(your partner, say): it would apply to everyone. Who each person is to you, and their own context: " +
+                "Tools → People, or ⋯ → Relationship on the card.")) {
+            contextField = field(L.t("例：我说话比较直，不太会哄人", "e.g. I'm blunt and not great at comforting people"), prefs.context, lines = 2)
         })
 
         addView(hint(L.t("所有改动自动保存。", "Everything saves automatically.")).apply { gravity = Gravity.CENTER })
@@ -522,6 +525,14 @@ class MainActivity : Activity() {
         val box = column().apply { setPadding(dp(20), dp(4), dp(20), 0) }
         if (r.muted) box.addView(text(L.t("已暂停：不解读，也不记录。", "Paused: not judged, nothing recorded."), 13f, warn()))
         box.addView(text(people.describe(id), 13f, sub()).apply { setTextIsSelectable(true) })
+        box.addView(text(L.t("Ta 是你的…", "They are your…"), 13f, fg()).apply { setPadding(0, dp(12), 0, 0) })
+        lateinit var relPill: TextView
+        val showRel = { relPill.text = relationChoice(people.relationOf(id)) + "  ▾" }
+        relPill = pill("", false) { pickRelation(id, showRel) }
+        showRel()
+        box.addView(wrapRow(listOf(relPill)))
+        box.addView(hint(L.t("选定后每条消息都按这个关系判断，学习此人也不会改掉它。「自动判断」：学习此人时从档案里读出来，没学过就每条看对话判断。",
+            "Every message is then judged as this, and learning this person won't change it. \"Work it out\": taken from the profile when you learn this person, otherwise judged from each chat.")))
         box.addView(text(L.t("专属背景（发给模型，优先于通用背景）", "Context for this person (sent to the model instead of the general one)"), 13f, fg()).apply { setPadding(0, dp(12), 0, 0) })
         val note = EditText(this).apply { setText(r.note); minLines = 2; hint = L.t("例：大学室友，说话很直", "e.g. college roommate, very blunt") }
         box.addView(note)
@@ -536,6 +547,26 @@ class MainActivity : Activity() {
             }
             .setNeutralButton(L.t("更多…", "More…")) { _, _ -> personActions(id) }
             .setNegativeButton(L.t("关闭", "Close"), null)
+            .show()
+    }
+
+    private fun relationChoice(key: String): String =
+        if (key.isEmpty()) L.t("自动判断", "Work it out") else L.label(key)
+
+    /** Who a person is to you, chosen from the same options Jev judges with. */
+    private fun pickRelation(id: String, done: () -> Unit) {
+        val keys = listOf("") + Relationship.KEYS
+        val now = keys.indexOf(people.relationOf(id)).coerceAtLeast(0)
+        AlertDialog.Builder(this)
+            .setTitle(L.t("${people.nameOf(id)} 是你的…", "${people.nameOf(id)} is your…"))
+            .setSingleChoiceItems(keys.map { relationChoice(it) }.toTypedArray(), now) { d, which ->
+                people.setRelation(id, keys[which])
+                d.dismiss()
+                done()
+                toast(if (which == 0) L.t("关系：自动判断", "Relationship: worked out automatically")
+                    else L.t("关系已设为：", "Relationship set: ") + relationChoice(keys[which]))
+            }
+            .setNegativeButton(L.t("取消", "Cancel"), null)
             .show()
     }
 
@@ -882,8 +913,9 @@ class MainActivity : Activity() {
                 "2. 进聊天页，边上出现小气泡；对方发来消息后气泡变色，点开看卡片。\n" +
                 "3. 拖动气泡换位置，长按气泡打开菜单：重新判断、暂停 1 小时、这个聊天不再解读、设置。\n" +
                 "4. 「回复」给出三条草稿，点一条会填进空的输入框（不会发送），长按任意一行复制。\n" +
-                "5. 「学习」会自己往上翻聊天记录，写一份这个人的档案；再点一下气泡就停。\n" +
-                "6. 没有气泡就去「诊断」打开调试模式，看服务到底读到了什么。\n\n" +
+                "5. 「学习」会自己往上翻聊天记录，写一份这个人的档案，也记下 Ta 是你的什么人；再点一下气泡就停。\n" +
+                "6. 卡片上 ⋯ → 关系：告诉它 Ta 是你的恋人、朋友、同事……之后每条都按这个判断，不会再把好友当成对象。\n" +
+                "7. 没有气泡就去「诊断」打开调试模式，看服务到底读到了什么。\n\n" +
                 "学习\n" +
                 "卡片给出建议后，下一轮对方的语气变化就是这次建议的回报：变缓和为正，升级为负。" +
                 "应用据此校准这段关系的风险偏置，并重排「最佳动作」。卡片底部出现「已按你们过去的走向调整」时，说明经验改变了排在最前面的动作。" +
@@ -898,8 +930,9 @@ class MainActivity : Activity() {
                 "2. Open a chat: a small bubble appears at the edge and takes on a colour when a message arrives. Tap it for the card.\n" +
                 "3. Drag the bubble to move it. Long-press it for the menu: re-check, pause 1 hour, pause this chat, settings.\n" +
                 "4. Reply gives three drafts; tap one to put it in the empty reply box (it is never sent), long-press any line to copy it.\n" +
-                "5. Learn scrolls up through the history by itself and writes a profile of this person; tap the bubble to stop early.\n" +
-                "6. No bubble? Turn on debug mode under Diagnostics to see what the service actually reads.\n\n" +
+                "5. Learn scrolls up through the history by itself and writes a profile of this person, including who they are to you; tap the bubble to stop early.\n" +
+                "6. On the card, ⋯ → Relationship tells it who they are to you (partner, friend, colleague…). Every message is then judged as that, so a close friend is not read as a partner.\n" +
+                "7. No bubble? Turn on debug mode under Diagnostics to see what the service actually reads.\n\n" +
                 "Learning\n" +
                 "After the card suggests a move, how the other side's tone changes next turn is that move's reward: calmer is positive, escalation negative. " +
                 "The app calibrates this relationship's risk from it and re-ranks the best move; \"adjusted from how things went before\" means experience overrode the model's first choice. " +

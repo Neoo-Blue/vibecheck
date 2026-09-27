@@ -154,6 +154,10 @@ object Jev {
     /**
      * The request body. state carries the relationship context and the visible transcript;
      * every question is asked over that same state.
+     *
+     * [relationship] is who they are to me when that is known (Relationship.KEYS). With no
+     * context at all nothing is assumed: this used to say "a chat within an intimate
+     * relationship", and every friend without a profile was judged as a partner.
      */
     fun stateJson(
         context: String,
@@ -163,13 +167,15 @@ object Jev {
         history: String? = null,
         relation: String? = null,
         source: String? = null,
+        relationship: String? = null,
     ): String {
         val msgs = transcript.joinToString(",") { (who, text) ->
             """{"谁":${q(who)},"内容":${q(text)}}"""
         }
         val parts = ArrayList<String>()
         peer?.takeIf { it.isNotBlank() }?.let { parts.add(""""对方":${q(it)}""") }
-        parts.add(""""关系背景":${q(context.ifBlank { "一段亲密关系中的日常聊天" })}""")
+        relationship?.takeIf { it.isNotBlank() }?.let { parts.add(""""我和对方的关系":${q(it)}""") }
+        context.takeIf { it.isNotBlank() }?.let { parts.add(""""关系背景":${q(it)}""") }
         style?.takeIf { it.isNotBlank() }?.let { parts.add(""""我平时的说话方式":${q(it)}""") }
         history?.takeIf { it.isNotBlank() }?.let { parts.add(""""我们最近几轮的走向":${q(it)}""") }
         relation?.takeIf { it.isNotBlank() }?.let { parts.add(""""这段关系的长期观察":${q(it)}""") }
@@ -191,23 +197,35 @@ object Jev {
         source: String? = null,
     ): String = triageBody(stateJson(context, transcript, peer, style, history, relation, source))
 
+    /** The situation question's options: Relationship.KEYS, each with what it covers. */
+    val SITUATION_CRITERIA: List<Pair<String, String>> = listOf(
+        "恋人或伴侣" to "我和对方是一对：男女朋友、对象、夫妻",
+        "暧昧试探" to "还没确定关系，我们之间在互相试探和拉扯",
+        "朋友" to "朋友之间的闲聊、约饭、吐槽，包括无话不谈的好友、闺蜜、死党",
+        "家人" to "父母、兄弟姐妹、亲戚",
+        "同事或上下级" to "工作场合，涉及任务、进度、责任",
+        "客户或生意" to "甲乙方、买卖、谈价格和条件",
+        "陌生人或刚加上" to "刚认识，信息很少，礼貌距离",
+        "客服或办事" to "办业务、求助、走流程",
+    )
+
+    /**
+     * Who they are to me, judged from this turn. Asked only while nobody knows: once the
+     * relationship is learned or set it is in the state, and asking again could only contradict
+     * it. About the two people, not the topic: friends talking about a boyfriend are still friends.
+     */
+    private val SITUATION_QUESTION: String = """
+          "situation":{"type":"choice",
+            "instructions":${q("我和对方是什么关系？看的是我们两个人之间的关系，不是聊天的话题：朋友之间聊各自的感情，仍然是朋友。背景里写了关系就以背景为准；没写就只看对话本身，不要默认是恋人。")},
+            "criteria":{${SITUATION_CRITERIA.joinToString(",") { (k, v) -> "${q(k)}:${q(v)}" }}}},"""
+
     /**
      * Stage one, every turn: what kind of situation is this, what are they after, how risky,
      * how urgent. Cheap, and enough to decide whether the turn deserves anything more.
+     * [askSituation] is false when the relationship is already known and in the state.
      */
-    fun triageBody(state: String): String = """
-        {"state":$state,"model":"$MODEL","questions":{
-          "situation":{"type":"choice",
-            "instructions":"这段对话属于哪一类关系和场合？只看对话本身和背景，不要假设一定是恋爱。",
-            "criteria":{
-              "恋爱或亲密关系":"伴侣、对象之间的日常或争执",
-              "暧昧试探":"还没确定关系，双方在互相试探和拉扯",
-              "朋友":"朋友之间的闲聊、约饭、吐槽",
-              "家人":"父母、兄弟姐妹、亲戚",
-              "同事或上下级":"工作场合，涉及任务、进度、责任",
-              "客户或生意":"甲乙方、买卖、谈价格和条件",
-              "陌生人或刚加上":"刚认识，信息很少，礼貌距离",
-              "客服或办事":"办业务、求助、走流程"}},
+    fun triageBody(state: String, askSituation: Boolean = true): String = """
+        {"state":$state,"model":"$MODEL","questions":{${if (askSituation) SITUATION_QUESTION else ""}
           "intent":{"type":"choice",
             "instructions":"对方发出最后一条消息时，真正想要达成的是什么？多数聊天是轻松的，别默认有潜台词。",
             "criteria":{

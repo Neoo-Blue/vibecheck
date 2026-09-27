@@ -57,6 +57,9 @@ class OverlayCard(
         fun onPauseChat()
         fun onUnpause()
         fun onSettings()
+        /** Who the person on the card is to me (Relationship.KEYS, "" = worked out), or null when there is nobody to set it for. */
+        fun relationNow(): String?
+        fun onSetRelation(key: String)
     }
 
     /** A titled panel under the judgment: the deep read, reply drafts, a learned profile. */
@@ -87,6 +90,8 @@ class OverlayCard(
     private var open = false
     private var expanded = false
     private var menu = false
+    /** The relationship choices are open under the menu. */
+    private var picking = false
     /** Non-null while a history read drives the chat: the bubble counts, and a tap stops the read. */
     private var learnCount: Int? = null
     /** Taken down for a screen change inside the app, with everything kept for coming back. */
@@ -117,6 +122,8 @@ class OverlayCard(
         badge: String? = null,
         risk: Float = 0f,
         sections: Map<String, Section> = emptyMap(),
+        /** The same card, updated: leave the reader where they were rather than back at the top. */
+        keepScroll: Boolean = false,
     ) {
         this.title = title
         this.blocks = blocks
@@ -130,7 +137,7 @@ class OverlayCard(
         pausedText = null
         if (blocks.isEmpty()) { hide(); return }
         suspended = false
-        render()
+        render(keepScroll)
     }
 
     /** One line of status in place of a judgment: "Thinking…", a missing key, an error. */
@@ -333,6 +340,7 @@ class OverlayCard(
         if (learnCount != null) return
         open = true
         menu = "menu" !in prefs.hiddenButtons
+        picking = false
         renderCard()
         if (blocks.isEmpty() && pausedText == null) actions.onOpened()
     }
@@ -507,7 +515,7 @@ class OverlayCard(
             ellipsize = TextUtils.TruncateAt.END
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         if ("menu" !in prefs.hiddenButtons && pausedText == null) {
-            addView(iconChip("⋯", L.t("更多操作", "More actions"), p, s) { menu = !menu; renderCard(keepScroll = true) })
+            addView(iconChip("⋯", L.t("更多操作", "More actions"), p, s) { menu = !menu; picking = false; renderCard(keepScroll = true) })
         }
         addView(iconChip("✕", L.t("收起", "Close"), p, s) {
             open = false; expanded = false; menu = false
@@ -515,12 +523,39 @@ class OverlayCard(
         })
     }
 
-    private fun menuRow(p: Palette, s: Float): View = flow(listOf(
-        chip(L.t("重新判断", "Re-check"), p, s) { menu = false; actions.onRescan() },
-        chip(L.t("暂停 1 小时", "Pause 1 h"), p, s) { menu = false; actions.onSnooze() },
-        chip(L.t("这个聊天不再解读", "Pause this chat"), p, s) { menu = false; actions.onPauseChat() },
-        chip(L.t("设置", "Settings"), p, s) { menu = false; actions.onSettings() },
-    )).also { it.setPadding(0, dp(2), 0, dp(6)) }
+    private fun menuRow(p: Palette, s: Float): View {
+        val rel = actions.relationNow()
+        val chips = ArrayList<View>()
+        chips.add(chip(L.t("重新判断", "Re-check"), p, s) { menu = false; actions.onRescan() })
+        if (rel != null) chips.add(chip(L.t("关系：", "Relationship: ") + relationName(rel) + if (picking) " ▴" else " ▾", p, s) {
+            picking = !picking
+            renderCard(keepScroll = true)
+        })
+        chips.add(chip(L.t("暂停 1 小时", "Pause 1 h"), p, s) { menu = false; actions.onSnooze() })
+        chips.add(chip(L.t("这个聊天不再解读", "Pause this chat"), p, s) { menu = false; actions.onPauseChat() })
+        chips.add(chip(L.t("设置", "Settings"), p, s) { menu = false; actions.onSettings() })
+        val row = LinearLayout(svc).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(2), 0, dp(6))
+            addView(flow(chips))
+        }
+        if (rel != null && picking) {
+            row.addView(line(L.t("Ta 是你的…（选定后每条都按这个判断）", "They are your… (every message is judged as this)"), 11f * s, p.header, dp(2)).apply {
+                setPadding(0, dp(6), 0, 0)
+            })
+            row.addView(flow((listOf("") + Relationship.KEYS).map { key ->
+                chip((if (key == rel) "✓ " else "") + relationName(key), p, s) {
+                    picking = false
+                    menu = false
+                    actions.onSetRelation(key)
+                }
+            }))
+        }
+        return row
+    }
+
+    private fun relationName(key: String): String =
+        if (key.isEmpty()) L.t("自动判断", "work it out") else L.label(key)
 
     /** The buttons at the bottom. Think, Reply and Learn can be switched off in the Tools tab. */
     private fun toolbar(p: Palette, s: Float): View {

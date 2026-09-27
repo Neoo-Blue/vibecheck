@@ -21,7 +21,7 @@ Every new message from the other side gets a quick **triage**:
 
 | id | type | question |
 |---|---|---|
-| `situation` | choice | what kind of chat: romance / flirting / friend / family / colleague / client / stranger / customer service |
+| `situation` | choice | who they are to you: partner / flirting / friend / family / colleague / client / stranger / customer service. Asked only while that is unknown (see "Who they are to you") |
 | `intent` | choice | what they actually mean |
 | `danger` | score | how badly this turn can go, x / 6 |
 | `urgency` | noul | does this need an answer now |
@@ -35,7 +35,7 @@ the situation**, so a work chat and a first chat with a stranger show different 
 | colleague / client / customer service | what they are asking for, time pressure, does going along commit me to something, best move |
 | stranger | their interest, should I push, where to take the topic, best move |
 | friend / family | their mood, what they need right now, best move |
-| romance / flirting | are they being literal, what they need right now, best move |
+| partner / flirting | are they being literal, what they need right now, best move |
 
 Jev only returns judgments with probabilities; it never writes lines for you. The "suggested
 move" at the bottom of the card is computed in code from `danger`.
@@ -72,7 +72,7 @@ The app has two tabs, and everything saves as you go:
 
 - **Setup** holds only what it takes to get going: the checklist, the judging engine and keys,
   which apps to watch, a few behaviour switches (judging on, automatic deep reads, OCR, learning,
-  remembering people) and the general relationship context.
+  remembering people) and a general context for people you have not described.
 - **Tools** holds everything else, one simple tile each: **Pause** (1 hour, or until 8 am),
   **People** (see and edit what was learned per person, pause a person, merge, forget, clean up
   near-empty records), **Card** (text size, which buttons the card shows, buzz on high risk,
@@ -115,7 +115,7 @@ not whether you followed it. The bandit is stored in SharedPreferences and can b
 Each settlement updates three keys and lookup falls back from the most specific:
 
 ```
-romance|expressing displeasure|apologize first   ← used once it has 3+ samples
+partner|expressing displeasure|apologize first   ← used once it has 3+ samples
 *|expressing displeasure|apologize first         ← new situation: fall back to "this intent"
 *|*|apologize first                              ← new intent: "how does this action do in general"
 ```
@@ -141,7 +141,7 @@ Score answers carry their meaning ("3 / 4 · today", "5 / 6 · risky"), not just
 | Think | one deep pass through DeepSeek on OpenRouter: what they care about, the trap in this step, a concrete next move |
 | Reply | three reply drafts in **your own way of speaking**; tap one to put it into the (empty) reply box, long-press to copy. Nothing is ever sent for you |
 | Learn | read this person's whole history and write a profile (see "Learn this person") |
-| ⋯ | re-check this screen, pause 1 hour, pause this chat, settings |
+| ⋯ | re-check this screen, who they are to you, pause 1 hour, pause this chat, settings |
 | ✕ | back to the bubble |
 
 Think, Reply, Learn and ⋯ can each be switched off under Tools → Card. The deep read and the
@@ -199,11 +199,12 @@ and stores everything under "app package + name":
 
 | stored | from | used as |
 |---|---|---|
-| personal note | typed by you in settings | overrides the generic "relationship context" |
+| who they are to you | learned from the history, or chosen on the card (⋯ → Relationship) or under Tools → People | `我和对方的关系` in the state; the situation question is then not asked |
+| personal note | typed by you in settings | `relationship context`, together with the profile; both replace the general context |
 | how I talk to them | statistics over my own messages | `my usual way of speaking` in the state |
 | last 8 turns | one `intent / danger / action` line per judgment | `where the last few turns went` in the state |
 | this person's bandit | see Learning | calibrates danger, re-ranks the best move |
-| profile | 4 to 6 lines written by DeepSeek after "learn this person" | `relationship context` when no note is set |
+| profile | 4 to 6 lines written by DeepSeek after "learn this person" | `relationship context`, together with your note |
 
 The same sentence means different things from different people, so nothing is shared between
 two people: "apologize first" working on A does not touch B's ranking. Tools → People shows what
@@ -222,9 +223,28 @@ count, and the app pages up through the history by itself. Each page's new lines
 onto the front, aligned by the overlap between pages rather than by de-duplicating text, so
 "ok" sent thirty times stays thirty messages. It stops after four pages without new content or
 at 60 pages; tap the bubble to stop early and keep what was read. The full read then replaces
-message counts and speaking style, and DeepSeek writes the profile. Switching app or page, or an
-interrupted service, cancels the read; a read that covers fewer messages than the live count does
-not overwrite the statistics.
+message counts and speaking style, and DeepSeek writes the profile, starting with who they are to
+you. The card on screen is then judged again, on the same messages, with what was learned. The
+read leaves the chat scrolled far up; those old screens are not judged, and judging picks up again
+once the newest messages are back on screen. Switching app or page, or an interrupted service,
+cancels the read; a read that covers fewer messages than the live count does not overwrite the
+statistics.
+
+### Who they are to you
+
+Each person can carry a relationship: partner, flirting, friend, family, colleague, client,
+stranger or customer service, the same options as the `situation` question. Once it is known,
+Jev is told instead of asked, so every message is judged as what it is and the card can no
+longer call a best friend a partner because the two of you were talking about their boyfriend.
+Without one, the question asks about the two of you rather than the topic, and nothing is
+assumed.
+
+It is filled in by "learn this person" (the profile's first line), and can be chosen by hand on
+the card (⋯ → Relationship) or under Tools → People; your choice wins over a later read, and
+"Work it out" hands it back to the reads. Profiles
+written before 6.6.1 are read for it from their first line when that line is unambiguous. When the
+relationship, a profile or a note changes, the card for that chat is judged again, and the result
+of the read stays under the new card.
 
 ### One person across apps
 

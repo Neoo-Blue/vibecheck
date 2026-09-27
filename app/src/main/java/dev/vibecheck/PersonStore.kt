@@ -29,6 +29,13 @@ class PersonStore(ctx: Context) {
         var learned: Int = 0,
         /** Judging and watching are off for this person: nothing is sent, nothing is counted. */
         var muted: Boolean = false,
+        /**
+         * Who they are to me (Relationship.KEYS), or "" to work it out from each chat. Learned from
+         * the history read, or set by hand; when set, Jev is told instead of asked.
+         */
+        var rel: String = "",
+        /** [rel] was chosen by hand, so a new history read leaves it alone. */
+        var relByHand: Boolean = false,
         /** Every app this person has been seen on: their own plus any linked records. */
         val apps: List<String> = listOf(id.substringBefore('|')),
     )
@@ -53,6 +60,7 @@ class PersonStore(ctx: Context) {
         b.history = (a.history + b.history).takeLast(Person.HISTORY)
         if (b.note.isBlank()) b.note = a.note
         if (b.bio.isBlank()) b.bio = a.bio
+        if (!b.relByHand && (b.rel.isBlank() || a.relByHand) && a.rel.isNotBlank()) { b.rel = a.rel; b.relByHand = a.relByHand }
         b.learned += a.learned
         val aliases = (aliasesOf(intoId) + aliasId + aliasesOf(aliasId)).distinct()
         forget(aliasId)
@@ -64,13 +72,18 @@ class PersonStore(ctx: Context) {
 
     fun loadId(id: String): Record = load(id.substringBefore('|'), id.substringAfter('|'))
 
-    /** What the model should be told about this person: your note wins, then the learned bio. */
+    /**
+     * What the model should be told about this person: your note and the learned profile, both;
+     * the general context only for someone with neither. A note used to replace the profile, so
+     * writing one line about a person threw away everything a history read had found.
+     */
     fun background(r: Record, fallback: String): String =
-        r.note.ifBlank { r.bio }.ifBlank { fallback }
+        listOf(r.note, r.bio).map { it.trim() }.filter { it.isNotEmpty() }.joinToString("\n").ifBlank { fallback }
 
     fun load(pkg: String, name: String): Record {
         val own = Person.id(pkg, name)
         val id = canonical(own)
+        val bio = sp.getString("$id:bio", "") ?: ""
         return Record(
             id = id,
             name = if (id == own) name.trim() else nameOf(id),
@@ -82,9 +95,11 @@ class PersonStore(ctx: Context) {
             stats = Relation.load(sp.getString("$id:stats", "") ?: ""),
             tail = Person.loadTail(sp.getString("$id:tail", "") ?: ""),
             legacySeen = sp.getString("$id:seen", "") ?: "",
-            bio = sp.getString("$id:bio", "") ?: "",
+            bio = bio,
             learned = sp.getInt("$id:learned", 0),
             muted = sp.getBoolean("$id:muted", false),
+            rel = relationStored(id, bio),
+            relByHand = sp.getBoolean("$id:relset", false),
         )
     }
 
@@ -101,6 +116,8 @@ class PersonStore(ctx: Context) {
             .putString("${r.id}:bio", r.bio)
             .putInt("${r.id}:learned", r.learned)
             .putBoolean("${r.id}:muted", r.muted)
+            .putString("${r.id}:rel", r.rel)
+            .putBoolean("${r.id}:relset", r.relByHand)
         if (r.legacySeen.isEmpty()) e.remove("${r.id}:seen")
         if (r.id !in ids) e.putString("index", (ids + r.id).joinToString("\n"))
         e.apply()
@@ -114,6 +131,30 @@ class PersonStore(ctx: Context) {
     fun isMuted(id: String): Boolean = sp.getBoolean("${canonical(id)}:muted", false)
 
     fun setMuted(id: String, muted: Boolean) = sp.edit().putBoolean("${canonical(id)}:muted", muted).apply()
+
+    /**
+     * The stored relationship. Profiles from before there was one say it in words on their first
+     * line, so those people get theirs without a new history read (saved with the next save).
+     */
+    private fun relationStored(id: String, bio: String): String =
+        (sp.getString("$id:rel", null) ?: Relationship.fromProfile(bio).first)
+            ?.let { Relationship.pinned(it) }.orEmpty()
+
+    /** Who they are to me, or "" when it is worked out from each chat. */
+    fun relationOf(id: String): String {
+        val c = canonical(id)
+        return relationStored(c, sp.getString("$c:bio", "") ?: "")
+    }
+
+    /**
+     * Chosen by hand, so a later history read leaves it alone. "" hands it back: the next read
+     * fills it in, and until then each chat is judged on its own.
+     */
+    fun setRelation(id: String, key: String) {
+        val c = canonical(id)
+        val pinned = Relationship.pinned(key)
+        sp.edit().putString("$c:rel", pinned.orEmpty()).putBoolean("$c:relset", pinned != null).apply()
+    }
 
     /**
      * Snap a freshly computed fingerprint onto the closest existing one for this app, so a
@@ -142,7 +183,7 @@ class PersonStore(ctx: Context) {
         val e = sp.edit()
             .remove("$id:name").remove("$id:note").remove("$id:style")
             .remove("$id:learn").remove("$id:hist").remove("$id:stats").remove("$id:seen")
-            .remove("$id:tail").remove("$id:muted")
+            .remove("$id:tail").remove("$id:muted").remove("$id:rel").remove("$id:relset")
             .remove("$id:bio").remove("$id:learned").remove("$id:aliases")
             .putString("index", index().filter { it != id }.joinToString("\n"))
         for (x in aliasesOf(id)) e.remove("link:$x")
@@ -172,7 +213,7 @@ class PersonStore(ctx: Context) {
         for (id in index()) {
             val r = loadId(id)
             val total = r.stats.theirMsgs + r.stats.myMsgs
-            if (total < 3 && r.note.isBlank() && r.bio.isBlank() && r.model.updates == 0 && !r.muted &&
+            if (total < 3 && r.note.isBlank() && r.bio.isBlank() && r.model.updates == 0 && !r.muted && !r.relByHand &&
                 aliasesOf(id).isEmpty()) {
                 forget(id); n++
             }
@@ -192,6 +233,13 @@ class PersonStore(ctx: Context) {
         return if (bits.isEmpty()) L.t("刚认识，还没积累", "Just met, nothing learned yet") else bits.joinToString("\n\n")
     }
 
+    /** "关系：朋友（你设定的）", or null when it is worked out from each chat. */
+    fun relationLine(r: Record): String? {
+        val key = Relationship.pinned(r.rel) ?: return null
+        val how = if (r.relByHand) L.t("（你设定的）", " (set by you)") else L.t("（学习得出）", " (learned)")
+        return L.t("关系：", "Relationship: ") + L.label(key) + how
+    }
+
     /** One line per person, for the /learn debug route. */
     fun summary(): String {
         val ids = index()
@@ -202,6 +250,7 @@ class PersonStore(ctx: Context) {
                 Person.styleSummary(r.style),
                 Relation.summary(r.stats),
                 Learner.summary(r.model).first(),
+                relationLine(r),
                 r.note.takeIf { it.isNotBlank() }?.let { L.t("背景：$it", "note: $it") },
                 r.bio.takeIf { it.isNotBlank() }?.let { L.t("学到（${r.learned} 条）：${it.take(80)}", "learned (${r.learned} msgs): ${it.take(80)}") },
                 L.t("已暂停", "paused").takeIf { r.muted },

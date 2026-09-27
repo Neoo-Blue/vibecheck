@@ -100,13 +100,22 @@ object OpenRouter {
             "different strategies: 1 catches the feeling first, 2 gives a concrete plan, 3 defuses it lightly. " +
             "One per line, starting \"1. \" \"2. \" \"3. \", max 20 words each, no explanations.")
 
+    /**
+     * The profile starts with a fixed "关系：<option>" line (Relationship.KEYS), which is read back
+     * and kept on its own: a relationship in free words could not stop the judge from calling a
+     * best friend a partner.
+     */
     val BIO_SYSTEM: String get() = L.t(
         "你在读一段完整的聊天记录，写一份关于「对方」的档案给「我」以后用。只写记录里能看出来的，不编。" +
-            "四到六行，每行以「•」开头，各不超过 40 字：Ta 是我的什么人（关系与亲疏）；我们常聊什么；" +
+            "第一行固定写「关系：」，后面只写下面其中一个词：${Relationship.optionList()}。" +
+            "看的是 Ta 和我之间的关系，不是我们聊的话题：朋友之间聊各自的感情，仍然是朋友。" +
+            "然后四到六行，每行以「•」开头，各不超过 40 字：Ta 是我的什么人（关系与亲疏）；我们常聊什么；" +
             "Ta 的说话风格（长短、语气、口头禅、用不用表情）；我对 Ta 的说话风格；" +
             "反复出现的事或雷区；Ta 在乎什么。",
         "You are reading a complete chat history to write a profile of \"them\" for \"me\" to use later. " +
-            "Only what the history shows; invent nothing. Four to six lines, each starting with \"•\", max 20 words: " +
+            "Only what the history shows; invent nothing. The first line is \"Relationship: \" followed by exactly one of: " +
+            "${Relationship.optionList()}. That is what they are to me, not what we talk about: friends discussing their " +
+            "love lives are still friends. Then four to six lines, each starting with \"•\", max 20 words: " +
             "who they are to me (relationship, closeness); what we usually talk about; how they write (length, tone, " +
             "catchphrases, emoji); how I write to them; recurring topics or sore spots; what they care about.")
 
@@ -150,7 +159,10 @@ object OpenRouter {
         return sb.toString()
     }
 
-    /** Everything the deep model needs: the same state Jev saw, plus what Jev concluded. */
+    /**
+     * Everything the deep model needs: the same state Jev saw, plus what Jev concluded.
+     * [relationship] is who they are to me when that is known, rather than guessed this turn.
+     */
     fun deepPrompt(
         peer: String,
         note: String,
@@ -162,8 +174,10 @@ object OpenRouter {
         fromOcr: Boolean,
         hasImage: Boolean,
         situation: String? = null,
+        relationship: String? = null,
     ): String = buildString {
         append(L.t("对方：", "Them: ")).append(peer).append('\n')
+        relationship?.takeIf { it.isNotBlank() }?.let { append(L.t("我和对方的关系：", "Relationship: ")).append(L.label(it)).append('\n') }
         if (note.isNotBlank()) append(L.t("关系背景：", "Context: ")).append(note).append('\n')
         style?.let { append(L.t("我平时的说话方式：", "How I usually write: ")).append(it).append('\n') }
         history?.let { append(L.t("我们最近几轮的走向：", "Where the last few turns went: ")).append(it).append('\n') }

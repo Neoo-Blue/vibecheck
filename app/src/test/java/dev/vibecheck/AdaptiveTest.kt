@@ -18,7 +18,7 @@ class AdaptiveTest {
         val work = Jev.detailBody(state, "同事或上下级")
         val stranger = Jev.detailBody(state, "陌生人或刚加上")
         val friend = Jev.detailBody(state, "朋友")
-        val love = Jev.detailBody(state, "恋爱或亲密关系")
+        val love = Jev.detailBody(state, "恋人或伴侣")
 
         assertTrue(work.contains("\"trap\":{") && work.contains("\"pressure\":{"))
         assertTrue(stranger.contains("\"interest\":{") && stranger.contains("\"push\":{"))
@@ -32,7 +32,7 @@ class AdaptiveTest {
     }
 
     @Test fun everySetEndsInAnActionSoLearningAndFooterKeepWorking() {
-        for (sit in listOf("同事或上下级", "客户或生意", "陌生人或刚加上", "朋友", "家人", "恋爱或亲密关系", "暧昧试探", "客服或办事")) {
+        for (sit in listOf("同事或上下级", "客户或生意", "陌生人或刚加上", "朋友", "家人", "恋人或伴侣", "暧昧试探", "客服或办事")) {
             assertTrue(sit, Jev.detailBody(state, sit).contains("\"action\":{"))
             assertEquals(sit, "action", Jev.displayFor(sit).last().first)
         }
@@ -51,7 +51,7 @@ class AdaptiveTest {
         assertEquals(listOf("当前真实意图", "翻车风险", "对方在要什么", "时间压力", "顺着回会不会等于答应了？", "最佳动作"), headers)
 
         // The same answers rendered as an intimate chat would show none of the work headers.
-        val loveHeaders = Jev.card(answers, situation = "恋爱或亲密关系").map { it.header }
+        val loveHeaders = Jev.card(answers, situation = "恋人或伴侣").map { it.header }
         assertFalse(loveHeaders.contains("时间压力"))
     }
 
