@@ -66,20 +66,27 @@ the per-person learning is stored under; Jev reads English chats just as well.
 **Updating from 6.5 or earlier:** if "Learn" does not scroll after the update, switch the
 accessibility service off and on once, so Android picks up its new gesture permission.
 
-## The app: Setup and Tools
+## The app: Setup, People and Tools
 
-The app has two tabs, and everything saves as you go:
+The app has three tabs, and everything saves as you go:
 
-- **Setup** holds only what it takes to get going: the checklist, the judging engine and keys,
-  which apps to watch, a few behaviour switches (judging on, automatic deep reads, OCR, learning,
-  remembering people) and a general context for people you have not described.
+- **Setup** holds what it takes to get going: the checklist, the judging engine and keys, the
+  models (each option says what it is good at), which apps to watch, a few behaviour switches
+  (judging on, automatic deep reads, adult replies, OCR, learning, remembering people) and a
+  general context for people you have not described.
+- **People** lists everyone remembered: their name (or the emoji picture of it), apps, what they
+  are to you, how much was learned and one line from their profile. Tap someone for their page:
+  - what they are to you and how close you are;
+  - the profile, section by section;
+  - what was learned while you chatted: message counts, how you write to them, which moves
+    calmed things down and which made them worse;
+  - their name and context, edited there;
+  - pause, merge with another app, retake the name picture, delete the kept history, forget.
 - **Tools** holds everything else, one simple tile each: **Pause** (1 hour, or until 8 am),
-  **People** (see and edit what was learned per person, pause a person, merge, forget, clean up
-  near-empty records), **Card** (text size, which buttons the card shows, buzz on high risk,
-  bubble position), **Usage** (paid calls today and in total), **Backup** (export / import people
-  memory as a file; keys are not included), **Models**, **Keep it running** (battery optimisation
-  and app info shortcuts), **Diagnostics** (live status, debug mode, the LAN endpoint) and
-  **How it works**.
+  **Card** (text size, which buttons the card shows, buzz on high risk, bubble position),
+  **Usage** (paid calls today and in total), **Backup** (export / import people memory as a file;
+  keys are not included), **Keep it running** (battery optimisation and app info shortcuts),
+  **Diagnostics** (live status, debug mode, the LAN endpoint) and **How it works**.
 
 Every tile has a **Hide** button. Hidden tiles collect at the bottom of the Tools tab, where one
 tap brings a tile back (or **Show all**), so the dashboard only shows what you use.
@@ -158,9 +165,9 @@ retried with backoff; a rejected key is not retried until you change the key.
 
 **Pausing.** ⋯ → Pause 1 hour (or Tools → Pause) stops judging everywhere and resumes by itself.
 ⋯ → Pause this chat stops judging *and* recording for one person until you resume it from the
-card or from Tools → People. The bubble shows ⏸ while paused.
+card or from their page on the People tab. The bubble shows ⏸ while paused.
 
-**Two models, set under Tools → Models.**
+**Two models, chosen under Setup → Models.**
 - **Think and Learn** (default `deepseek/deepseek-v4-pro`) thinks a little before it writes.
 - **Reply and screenshot** (default `moonshotai/kimi-k2.6`) writes reply drafts without
   thinking first, and reads the screenshot that chats read by OCR send along (WeChat, Telegram:
@@ -168,13 +175,14 @@ card or from Tools → People. The bubble shows ⏸ while paused.
   Kimi K2.6 scores highest among open-weight models on EQ-Bench Creative Writing and writes
   Chinese first.
 
-Under each model there are one-tap choices:
+Each model is a list of options, each saying what it is good at; tap one to use it:
 - Reply: Kimi K2.6 (fast, writes well), Kimi K3 (writes best, #2 on EQ-Bench Creative Writing
-  behind Claude Opus 5; slower and dearer) or DeepSeek V4.1 Flash (fastest and cheapest).
-- Think and Learn: DeepSeek V4 Pro or Kimi K3.
+  behind Claude Opus 5; slower and dearer), DeepSeek V4.1 Flash (fastest and cheapest) or Qwen 3.8
+  Max (the most natural Chinese; Alibaba's API filters content, so no adult replies).
+- Think and Learn: DeepSeek V4 Pro, Kimi K3 or Qwen 3.8 Max.
 
-Any other OpenRouter model id can be typed in. Qwen writes very natural Chinese, but Alibaba's API
-filters content, so it will not write the adult replies below.
+**Other…** takes any OpenRouter model id. A model that reads no images gets the text alone when a
+screenshot would have gone along.
 
 Answers are streamed, so the read and the first draft show while the rest is written. Every call
 goes to the fastest provider OpenRouter has for the model (a slug with `:nitro`, `:floor` and
@@ -219,7 +227,7 @@ are fine where the app gives text. OCR (WeChat, Telegram) cannot see emoji at al
 - A chat whose name is only emoji is known by the avatar beside their messages, and the title
   bar is remembered against it for screens where only your own messages show.
 - Such a person is shown with the emoji itself: a small picture of the name cut from the chat's
-  title bar, on the card and in Tools → People, never an internal code.
+  title bar, on the card and on the People tab, never an internal code.
 - Their real name, emoji and all, is picked up from their message notifications: once a
   notification's message is on screen in that chat, its sender's name becomes theirs. The same
   puts the emoji back on names OCR read only in part ("欧欧" becomes "欧欧🌸").
@@ -231,9 +239,9 @@ are fine where the app gives text. OCR (WeChat, Telegram) cannot see emoji at al
 
 | stored | from | used as |
 |---|---|---|
-| who they are to you | learned from the history, or chosen on the card (⋯ → Relationship) or under Tools → People | `我和对方的关系` in the state; the situation question is then not asked |
+| who they are to you | learned from the history, or chosen on the card (⋯ → Relationship) or on their People page | `我和对方的关系` in the state; the situation question is then not asked |
 | how close you are | the same, as its own choice: distant, casual, familiar, close, very close | `我们有多亲近` in the state, and on the card title |
-| a name you gave them | ⋯ → Rename, or Tools → People | shown everywhere, and the name the models are given |
+| a name you gave them | ⋯ → Rename, or their People page | shown everywhere, and the name the models are given |
 | personal note | typed by you in settings | `relationship context`, together with the profile; both replace the general context |
 | how I talk to them | statistics over my own messages | `my usual way of speaking` in the state |
 | last 8 turns | one `intent / danger / action` line per judgment | `where the last few turns went` in the state |
@@ -242,7 +250,7 @@ are fine where the app gives text. OCR (WeChat, Telegram) cannot see emoji at al
 | profile | sections written by DeepSeek from the whole kept history | the full text for deep reads and drafts; a short brief as `relationship context`; one matching line on the card |
 
 The same sentence means different things from different people, so nothing is shared between
-two people: "apologize first" working on A does not touch B's ranking. Tools → People shows what
+two people: "apologize first" working on A does not touch B's ranking. Their page on the People tab shows what
 has been learned about each person (with search), lets you edit their note, pause them, merge
 them with the same person on another app, or forget them. Tools → Backup exports all of it to a
 file for a new phone.
@@ -264,7 +272,7 @@ background app's network once the screen goes off.
 
 What was read is kept on the phone (app-private storage, one file per chat) and topped up with
 new messages as you chat. The next Learn only reads back until it meets what is kept, so it
-takes seconds. Tools → People → More… deletes a kept history; forgetting a person deletes it too.
+takes seconds. Their page on the People tab deletes a kept history; forgetting a person deletes it too.
 
 Then the profile. A long history is sent to your OpenRouter model in stretches of about 12,000
 characters, three at a time: notes on each stretch, then one profile from all the notes. Notes
@@ -303,7 +311,7 @@ Without one, the question asks about the two of you rather than the topic, and n
 assumed.
 
 Both are filled in by "learn this person" (the profile's first two lines), and can be chosen by
-hand on the card (⋯ → Relationship) or under Tools → People; your choice wins over a later read,
+hand on the card (⋯ → Relationship) or on their People page; your choice wins over a later read,
 and "Work it out" / "Not sure" hands it back to the reads. Profiles written before 6.7.0 are read
 for both from their first line when that line is unambiguous ("好友或死党，关系亲密" is a friend,
 close). When the relationship, the closeness, a name, a profile or a note changes, the card for
@@ -311,7 +319,7 @@ that chat is judged again, and the result of the read stays under the new card.
 
 ### One person across apps
 
-When Li on WeChat and Sam on Messenger are the same person, open Tools → People → Li → More… →
+When Li on WeChat and Sam on Messenger are the same person, open People → Li → More →
 "Merge with another person", and choose the other. Counts, speaking style, recent turns, profile and bandit
 are folded together (arms pool their samples, the danger bias is weighted by how much each side
 learned), and from then on either chat opens the same memory.

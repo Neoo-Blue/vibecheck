@@ -173,6 +173,20 @@ object Profile {
     }
 
     /**
+     * One line about the person for the People list: how we get along, else who they are, else
+     * the start of an older free-form profile. Null for no profile.
+     */
+    fun oneLine(profile: String, max: Int = 40): String? {
+        if (profile.isBlank()) return null
+        val secs = sections(profile)
+        val line = listOf("us", "who").firstNotNullOfOrNull { id -> secs.firstOrNull { it.id == id && it.lines.isNotEmpty() }?.lines?.first() }
+            ?: secs.firstOrNull { it.lines.isNotEmpty() }?.lines?.first()
+            ?: return null
+        val t = line.trim().removePrefix("•").removePrefix("-").trim()
+        return if (t.length <= max) t else t.take(max - 1) + "…"
+    }
+
+    /**
      * The one thing from the profile that bears on this message, for the card: how they take
      * comfort when that is what they need, their sore spots when it could go wrong, the running
      * jokes when they are joking. Null when nothing fits or the profile has no such section.

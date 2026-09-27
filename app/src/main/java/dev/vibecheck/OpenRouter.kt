@@ -55,6 +55,10 @@ object OpenRouter {
         send(apiKey, model, system, user, imageJpegBase64, maxTokens, timeoutMs, temperature, Think.LOW, onLine)
     }
 
+    /** "No endpoints found that support image input": a text-only model was sent a screenshot. */
+    fun noImages(e: Throwable): Boolean =
+        e is Failure && (e.status == 404 || e.status == 400) && e.message.orEmpty().contains("image", ignoreCase = true)
+
     /** "Reasoning is mandatory for this endpoint and cannot be disabled." */
     fun thinkingRequired(think: Think, e: Failure): Boolean =
         think == Think.OFF && e.status == 400 && e.message.orEmpty().contains("reason", ignoreCase = true)
@@ -347,10 +351,13 @@ object OpenRouter {
         if (fromOcr) {
             append(L.t("\n注意：这些文字是从手机屏幕识别出来的，表情符号和表情包图片没有被识别出来。",
                 "\nNote: this text was OCR'd from the screen; emoji and stickers were not captured."))
-            if (hasImage) append(L.t("随附的截图是完整画面，表情包和表情以截图为准。",
-                " The attached screenshot is the full picture; trust it for stickers and emoji."))
+            if (hasImage) append(SCREENSHOT_NOTE)
         }
     }
+
+    /** Told when a screenshot goes along; taken out again for a model that reads no images. */
+    val SCREENSHOT_NOTE: String get() = L.t("随附的截图是完整画面，表情包和表情以截图为准。",
+        " The attached screenshot is the full picture; trust it for stickers and emoji.")
 
     /**
      * Whose move it is. Without it a draft could answer my own last message as if it were theirs,

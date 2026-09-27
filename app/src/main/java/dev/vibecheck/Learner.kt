@@ -152,6 +152,33 @@ object Learner {
             top.map { "${armLabel(it.key)}  n=${it.value.n}  r=${"%+.2f".format(it.value.mean)}" }
     }
 
+    /**
+     * What judging this person has taught, in words for their page: whether chats with them run
+     * hotter or calmer than they read, and which moves were followed by things calming down or
+     * getting worse. Empty until there is something to say.
+     */
+    fun plain(m: Model): List<String> {
+        val out = ArrayList<String>()
+        when {
+            m.dangerBias >= 0.05 -> out.add(L.t("和 Ta 聊天比看上去更容易出问题，卡片上的风险会调高一些。",
+                "Chats with them go wrong more easily than they read; the card rates risk a little higher."))
+            m.dangerBias <= -0.05 -> out.add(L.t("Ta 比看上去更好说话，卡片上的风险会调低一些。",
+                "They are easier going than they read; the card rates risk a little lower."))
+        }
+        // By what they meant, whatever the situation: the most readable level of what was learned.
+        val byIntent = m.arms.entries.filter { it.key.startsWith("*|") && !it.key.startsWith("*|*|") && it.value.n >= MIN_N }
+        fun say(key: String, arm: Arm, good: Boolean): String {
+            val (_, intent, action) = key.split('|')
+            return if (good) L.t("Ta「${L.label(intent)}」时，「${L.label(action)}」之后气氛缓和了（${arm.n} 次）",
+                "When they were ${L.label(intent)}, \"${L.label(action)}\" was followed by things calming down (${arm.n} times)")
+            else L.t("Ta「${L.label(intent)}」时，「${L.label(action)}」之后更僵了（${arm.n} 次）",
+                "When they were ${L.label(intent)}, \"${L.label(action)}\" was followed by things getting worse (${arm.n} times)")
+        }
+        byIntent.filter { it.value.mean >= 0.1 }.sortedByDescending { it.value.mean }.take(3).forEach { out.add(say(it.key, it.value, true)) }
+        byIntent.filter { it.value.mean <= -0.1 }.sortedBy { it.value.mean }.take(2).forEach { out.add(say(it.key, it.value, false)) }
+        return out
+    }
+
     /** "朋友|*|先道歉" in the display language: the stored key itself never changes. */
     fun armLabel(key: String): String = key.split('|').joinToString("|") { if (it == "*") it else L.label(it) }
 

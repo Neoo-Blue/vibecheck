@@ -6,29 +6,74 @@ heading matches the tag.
 
 ## 6.7.4
 
-**Replies from a model that writes Chinese well.** The reply model is now Kimi K2.6
-(`moonshotai/kimi-k2.6`). Among open-weight models it has the highest EQ-Bench Creative Writing
-score, and Chinese is its first language. It reads screenshots, answers at about 70 tokens a
-second without thinking first, and is served by many providers, so the 18+ switch works with it.
-Under each model on Tools → Models there are now one-tap choices, no typing of model ids on a
-phone:
-- Reply: Kimi K2.6 (fast, writes well), Kimi K3 (writes best, #2 on EQ-Bench Creative Writing
-  behind Claude Opus 5; slower and dearer) or DeepSeek V4.1 Flash (fastest and cheapest).
-- Think and Learn: DeepSeek V4 Pro or Kimi K3.
+**People get a tab of their own.** Everyone remembered is on the new People tab. Each card shows:
+- their name, or the emoji picture of it;
+- their apps and what they are to you;
+- how many messages were learned;
+- one line from their profile.
 
-Settings pages of earlier versions saved the default model as if you had chosen it, so a new
-default never reached you. Those saved defaults are cleared once, and a default is no longer
-saved at all.
+Tap someone for their page:
+- what they are to you and how close you are, changeable there;
+- the profile, section by section, with when it was learned;
+- what was learned while you chatted: message counts, how you write to them, and which moves
+  calmed things down or made them worse, in words;
+- their name and context, edited there;
+- pause, merge with another app, retake the name picture, delete the kept history, forget.
+
+The People and Models tiles have left Tools.
+
+**Models are chosen in Setup, from options that say what they are good at.** The reply model is
+now Kimi K2.6 (`moonshotai/kimi-k2.6`): it has the highest EQ-Bench Creative Writing score among
+open-weight models, Chinese is its first language, it reads screenshots, it answers at about 70
+tokens a second, and the 18+ switch works with it. The options:
+- Reply:
+  - Kimi K2.6;
+  - Kimi K3: writes best, #2 on EQ-Bench Creative Writing behind Claude Opus 5; slower and dearer;
+  - DeepSeek V4.1 Flash: fastest and cheapest;
+  - Qwen 3.8 Max: the most natural Chinese, but it filters content, so no adult replies.
+- Think and Learn: DeepSeek V4 Pro, Kimi K3 or Qwen 3.8 Max.
+- Other…: any OpenRouter model id.
+
+A model that reads no images gets the text alone when a screenshot would have gone along. Earlier
+settings pages saved the default model as if you had chosen it, so a new default never reached
+you. Those saved defaults are cleared once, and a default is no longer saved at all.
+
+**The wrong picture for an emoji name.** A contact named 🍵 showed a picture of a notification
+("…improvements and QoL feat… vibecheck · Default") in place of their name. The name picture is
+cut from the chat's title bar, and a notification had slid over it at that moment; the first
+picture was kept for good.
+- Nothing is cut from the title bar, or fingerprinted there, while a notification or our own card
+  covers it.
+- A picture is kept only once two looks agree.
+- A kept picture is replaced once three looks in a row agree with each other and not with it, so
+  a wrong one mends itself.
+- The avatar that identifies such a chat is also taken from a message that nothing covers.
+- The person's page can retake the picture.
 
 中文：
-- 回复换成中文写得好的模型：Kimi K2.6（`moonshotai/kimi-k2.6`）。
-  - 它是 EQ-Bench 创意写作榜上开源模型的第一名，中文是母语。
-  - 能看截图，不先思考时每秒约 70 个字。
-  - 很多服务商都在跑它，成人回复开关也能用。
-- 「工具 → 模型」每个模型下面都有一点就换的按钮，不用在手机上打模型名：
-  - 回复：Kimi K2.6（又快又会写）、Kimi K3（写得最好，创意写作榜全球第二，仅次于 Claude Opus 5；慢一些、贵一些）、DeepSeek V4.1 Flash（最快最省）。
-  - 深思和学习：DeepSeek V4 Pro、Kimi K3。
-- 旧版设置页会把默认模型当成你选的存下来，导致新默认永远换不上。这次会清掉一次，以后也不再存默认值。
+- **「人物」页**：新标签页，列出记住的每个人。卡片上有：
+  - 名字或名字的 emoji 小图；
+  - 应用、关系；
+  - 学了多少条；
+  - 档案里的一句话。
+- **每个人的专页**，点进去能看到：
+  - 关系和亲近程度（可以直接改）；
+  - 分段的档案和学习时间；
+  - 边聊边学到的：话量、你对 Ta 的说话方式，哪些做法让气氛缓和、哪些更僵，用大白话写出来；
+  - 名字和专属背景，可以在这里改；
+  - 暂停、跨应用合并、重新截名字图片、删除存档、忘记。
+- **模型在「设置」里选**，每个选项都写着擅长什么：
+  - 回复默认换成 Kimi K2.6（开源模型里创意写作第一，中文母语，能看图，每秒约 70 字，成人回复也能用）；
+  - 还可以选 Kimi K3（写得最好，慢一些、贵一些）、DeepSeek V4.1 Flash（最快最省）、通义千问 3.8 Max（中文语感最自然，但会过滤内容，不写成人回复）；
+  - 深思和学习可以选 DeepSeek V4 Pro、Kimi K3、通义千问 3.8 Max；
+  - 「其他模型…」可以填任何 OpenRouter 模型名；
+  - 不能看图的模型只发文字。
+- **修复：emoji 名字的人显示成一张通知截图**：
+  - 截名字图片时正好有通知盖在标题栏上，而第一张图会一直留着；
+  - 现在标题栏被通知或卡片盖住时不截图，也不算指纹；
+  - 两次看到一样才保存；
+  - 已存的图如果连续三次都跟新看到的不一样，就自动换掉；
+  - 专页里也可以手动「重新截」。
 
 ## 6.7.3
 

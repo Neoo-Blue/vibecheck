@@ -17,7 +17,8 @@ class PersonStore(ctx: Context) {
     private val dir = File(ctx.filesDir, "archive")
     /** Pictures of names OCR cannot read (emoji), cut from the chat's title bar. */
     private val pictureDir = File(ctx.filesDir, "names")
-    private val pictures = HashMap<String, Bitmap>()
+    /** Decoded pictures with the file time they were read at: the service and the app each hold one. */
+    private val pictures = HashMap<String, Pair<Long, Bitmap>>()
 
     class Record(
         val id: String,
@@ -35,6 +36,8 @@ class PersonStore(ctx: Context) {
         var bio: String = "",
         /** How many messages the history read covered, so the card can say "learned N". */
         var learned: Int = 0,
+        /** When the profile was last written, or 0 for never. */
+        var learnedAt: Long = 0L,
         /** Judging and watching are off for this person: nothing is sent, nothing is counted. */
         var muted: Boolean = false,
         /**
@@ -117,6 +120,7 @@ class PersonStore(ctx: Context) {
             legacySeen = sp.getString("$id:seen", "") ?: "",
             bio = bio,
             learned = sp.getInt("$id:learned", 0),
+            learnedAt = sp.getLong("$id:learnedat", 0L),
             muted = sp.getBoolean("$id:muted", false),
             rel = rel,
             relByHand = sp.getBoolean("$id:relset", false),
@@ -139,6 +143,7 @@ class PersonStore(ctx: Context) {
             .putString("${r.id}:tail", Person.saveTail(r.tail))
             .putString("${r.id}:bio", r.bio)
             .putInt("${r.id}:learned", r.learned)
+            .putLong("${r.id}:learnedat", r.learnedAt)
             .putBoolean("${r.id}:muted", r.muted)
             .putString("${r.id}:rel", r.rel)
             .putBoolean("${r.id}:relset", r.relByHand)
@@ -205,13 +210,14 @@ class PersonStore(ctx: Context) {
     fun namePicture(id: String): Bitmap? {
         val c = canonical(id)
         if (aliasOf(c).isNotBlank() || !Person.isFingerprint(nameOf(c))) return null
-        pictures[c]?.let { return it }
-        val f = pictureFile(c)
-        if (!f.exists()) return null
-        return runCatching { BitmapFactory.decodeFile(f.path) }.getOrNull()?.also { pictures[c] = it }
+        // Replaced or deleted by the other process (service or app) since it was read: read again.
+        val stamp = pictureFile(c).lastModified()
+        if (stamp == 0L) { pictures.remove(c); return null }
+        pictures[c]?.takeIf { it.first == stamp }?.let { return it.second }
+        return runCatching { BitmapFactory.decodeFile(pictureFile(c).path) }.getOrNull()?.also { pictures[c] = stamp to it }
     }
 
-    fun hasNamePicture(id: String): Boolean = pictures.containsKey(canonical(id)) || pictureFile(id).exists()
+    fun hasNamePicture(id: String): Boolean = pictureFile(id).exists()
 
     fun saveNamePicture(id: String, picture: Bitmap) {
         val c = canonical(id)
@@ -219,7 +225,14 @@ class PersonStore(ctx: Context) {
             pictureDir.mkdirs()
             pictureFile(c).outputStream().use { picture.compress(Bitmap.CompressFormat.PNG, 100, it) }
         }
-        pictures[c] = picture
+        pictures[c] = pictureFile(c).lastModified() to picture
+    }
+
+    /** A wrong picture of their name goes; the next clear looks at the chat's title bar take a new one. */
+    fun deleteNamePicture(id: String) {
+        val c = canonical(id)
+        pictures.remove(c)
+        runCatching { pictureFile(c).delete() }
     }
 
     /**
@@ -364,14 +377,34 @@ class PersonStore(ctx: Context) {
             .minByOrNull { it.second }?.first?.second
 
     /** One row per person for the settings screen, most recently seen first. */
-    class Entry(val id: String, val name: String, val apps: List<String>, val messages: Int, val lastSeen: Long, val muted: Boolean)
+    /**
+     * One person as the People list shows them: [learned] messages read into a profile, [kind]
+     * "朋友 · 很铁" when known, and one line from the profile.
+     */
+    class Entry(
+        val id: String,
+        val name: String,
+        val apps: List<String>,
+        val messages: Int,
+        val lastSeen: Long,
+        val muted: Boolean,
+        val learned: Int = 0,
+        val kind: String? = null,
+        val line: String? = null,
+    )
 
     fun entries(): List<Entry> = index().map { id ->
         val stats = Relation.load(sp.getString("$id:stats", "") ?: "")
+        val bio = sp.getString("$id:bio", "") ?: ""
+        val (rel, close) = relationStored(id, bio)
         Entry(
             id, shownName(id),
             (listOf(id.substringBefore('|')) + aliasesOf(id).map { it.substringBefore('|') }).distinct(),
             stats.theirMsgs + stats.myMsgs, stats.lastSeen, sp.getBoolean("$id:muted", false),
+            learned = sp.getInt("$id:learned", 0),
+            kind = listOfNotNull(Relationship.pinned(rel)?.let { L.label(it) }, Relationship.closeness(close)?.let { L.label(it) })
+                .joinToString(" · ").ifBlank { null },
+            line = Profile.oneLine(bio),
         )
     }.sortedByDescending { it.lastSeen }
 

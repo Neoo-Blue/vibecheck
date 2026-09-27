@@ -220,17 +220,6 @@ class Prefs(ctx: Context) {
         /** What to store for a chosen model: nothing for the default, so a newer default reaches it. */
         fun stored(chosen: String, default: String): String = chosen.trim().takeIf { it != default }.orEmpty()
 
-        /** One-tap choices on Tools → Models: id, then what it is good at. */
-        val FAST_PICKS = listOf(
-            "moonshotai/kimi-k2.6" to Pair("Kimi K2.6 · 又快又会写", "Kimi K2.6 · fast and writes well"),
-            "moonshotai/kimi-k3" to Pair("Kimi K3 · 写得最好，慢一些", "Kimi K3 · writes best, slower"),
-            "deepseek/deepseek-v4.1-flash" to Pair("DeepSeek V4.1 Flash · 最快最省", "DeepSeek V4.1 Flash · fastest, cheapest"),
-        )
-        val DEEP_PICKS = listOf(
-            "deepseek/deepseek-v4-pro" to Pair("DeepSeek V4 Pro", "DeepSeek V4 Pro"),
-            "moonshotai/kimi-k3" to Pair("Kimi K3 · 更强，贵一些", "Kimi K3 · stronger, costs more"),
-        )
-
         const val USE_JUDGE = "judge"
         const val USE_DEEP = "deep"
         const val USE_REPLY = "reply"
