@@ -20,10 +20,22 @@ object OpenRouter {
     /** [status] is the HTTP status, or the error code OpenRouter put in a 200 body; 0 when unknown. */
     class Failure(val status: Int, message: String) : Exception(message)
 
+    /** How much the model thinks before it writes. */
+    enum class Think {
+        /** Straight to the answer: reply drafts, where speed is the point. */
+        OFF,
+        /** A little: deep reads and profiles. */
+        LOW,
+    }
+
     /**
      * Blocking. Call from a background thread. imageJpegBase64 null means text-only. A profile
      * from a long history needs more room and time than a three-line read: [maxTokens] and
-     * [timeoutMs].
+     * [timeoutMs] (the longest wait for the next piece of the answer, not for all of it).
+     *
+     * The answer is streamed: [onLine] gets everything written so far each time a line is done,
+     * so the card can show the first draft while the model is still writing the rest. A model
+     * that cannot switch thinking off is asked again with a little thinking.
      */
     fun chat(
         apiKey: String,
@@ -34,6 +46,45 @@ object OpenRouter {
         maxTokens: Int = 2500,
         timeoutMs: Int = 60_000,
         temperature: Double = 0.7,
+        think: Think = Think.LOW,
+        onLine: ((String) -> Unit)? = null,
+    ): String = try {
+        send(apiKey, model, system, user, imageJpegBase64, maxTokens, timeoutMs, temperature, think, onLine)
+    } catch (e: Failure) {
+        if (!thinkingRequired(think, e)) throw e
+        send(apiKey, model, system, user, imageJpegBase64, maxTokens, timeoutMs, temperature, Think.LOW, onLine)
+    }
+
+    /** "Reasoning is mandatory for this endpoint and cannot be disabled." */
+    fun thinkingRequired(think: Think, e: Failure): Boolean =
+        think == Think.OFF && e.status == 400 && e.message.orEmpty().contains("reason", ignoreCase = true)
+
+    /**
+     * OpenRouter's reasoning setting. Left to itself a reasoning model spent 18s and its whole
+     * budget thinking (one run looped on a homophone), then had nothing to say; drafts do not
+     * think at all.
+     */
+    fun reasoning(think: Think): JSONObject =
+        if (think == Think.OFF) JSONObject().put("enabled", false) else JSONObject().put("effort", "low")
+
+    /**
+     * The fastest provider rather than OpenRouter's default mix weighted toward the cheapest:
+     * the same DeepSeek model ran anywhere from 4 to 57 tokens a second depending on who served
+     * it. A slug with a variant (":nitro", ":floor", ":free") already says how to route.
+     */
+    fun providerSort(model: String): String? = if (model.contains(':')) null else "throughput"
+
+    private fun send(
+        apiKey: String,
+        model: String,
+        system: String,
+        user: String,
+        imageJpegBase64: String?,
+        maxTokens: Int,
+        timeoutMs: Int,
+        temperature: Double,
+        think: Think,
+        onLine: ((String) -> Unit)?,
     ): String {
         val content = if (imageJpegBase64 == null) JSONObject().put("role", "user").put("content", user)
         else JSONObject().put("role", "user").put(
@@ -51,14 +102,14 @@ object OpenRouter {
             .put("model", model)
             .put("temperature", temperature)
             .put("max_tokens", maxTokens)
-            // The output is three short lines. Left to itself the reasoning model spent 18s and
-            // its whole budget thinking (one run looped on a homophone), then had nothing to say.
-            .put("reasoning", JSONObject().put("effort", "low"))
+            .put("stream", true)
+            .put("reasoning", reasoning(think))
             .put(
                 "messages", JSONArray()
                     .put(JSONObject().put("role", "system").put("content", system))
                     .put(content)
-            ).toString()
+            )
+        providerSort(model)?.let { body.put("provider", JSONObject().put("sort", it)) }
 
         val conn = (URL(ENDPOINT).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
@@ -67,48 +118,103 @@ object OpenRouter {
             doOutput = true
             setRequestProperty("Authorization", "Bearer $apiKey")
             setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("Accept", "text/event-stream")
             setRequestProperty("X-Title", "Vibecheck")
         }
         try {
-            conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
             val code = conn.responseCode
-            val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
-                ?.bufferedReader()?.use(BufferedReader::readText) ?: ""
-            if (code !in 200..299) throw Failure(code, "HTTP $code: ${text.take(160)}")
-            val root = JSONObject(text)
-            val choices = root.optJSONArray("choices")?.takeIf { it.length() > 0 }
-                ?: root.optJSONObject("error").let { err ->
-                    throw Failure(err?.optInt("code") ?: 0, err?.optString("message") ?: "no choices: ${text.take(160)}")
-                }
-            val choice = choices.getJSONObject(0)
-            val msg = choice.getJSONObject("message")
-            // optString() on a JSON null returns the literal "null" on Android, which is how a
-            // truncated answer ended up printed on the card as the word null.
-            val content = if (msg.isNull("content")) "" else msg.optString("content").trim()
-            if (content.isNotEmpty()) return content
-            // Never fall back to the reasoning field: that is the model's private scratchpad, and
-            // showing it produced a card full of "但用户要求…" deliberation instead of replies.
+            if (code !in 200..299) {
+                val text = conn.errorStream?.bufferedReader()?.use(BufferedReader::readText) ?: ""
+                throw Failure(code, "HTTP $code: ${text.take(160)}")
+            }
+            val text = if (conn.contentType.orEmpty().contains("event-stream"))
+                conn.inputStream.bufferedReader(Charsets.UTF_8).use { collect(it.lineSequence().iterator(), ::piece, onLine) }
+            else whole(conn.inputStream.bufferedReader(Charsets.UTF_8).use(BufferedReader::readText))
+            val answer = text.trim()
+            if (answer.isNotEmpty()) return answer
+            // Never fall back to the reasoning: that is the model's private scratchpad, and showing
+            // it produced a card full of "但用户要求…" deliberation instead of replies.
             throw Failure(0, L.t("模型没写完，再点一次", "The model stopped before answering; try again"))
         } finally {
             conn.disconnect()
         }
     }
 
+    /** One event of a streamed answer: some text, the error that ended it, or neither. */
+    class Piece(val text: String?, val error: Failure?)
+
+    /** The payload of a server-sent event line; null for comments (": OPENROUTER PROCESSING") and the rest. */
+    fun sseData(line: String): String? = when {
+        line.startsWith("data: ") -> line.substring(6).trim()
+        line.startsWith("data:") -> line.substring(5).trim()
+        else -> null
+    }
+
+    /**
+     * Reads a streamed answer to its end. [piece] turns one event into text or an error; [onLine]
+     * gets everything so far each time a line is finished. The model's reasoning, sent as its own
+     * field, is never part of the text.
+     */
+    fun collect(lines: Iterator<String>, piece: (String) -> Piece, onLine: ((String) -> Unit)?): String {
+        val out = StringBuilder()
+        var shown = 0
+        for (line in lines) {
+            val data = sseData(line) ?: continue
+            if (data == "[DONE]") break
+            if (data.isEmpty()) continue
+            val p = piece(data)
+            p.error?.let { throw it }
+            p.text?.let { out.append(it) }
+            if (onLine != null) {
+                val done = out.lastIndexOf("\n") + 1
+                if (done > shown) { shown = done; onLine(out.substring(0, done)) }
+            }
+        }
+        return out.toString()
+    }
+
+    /** One streamed chunk. optString() on a JSON null returns the literal "null" on Android. */
+    private fun piece(data: String): Piece {
+        val o = runCatching { JSONObject(data) }.getOrNull() ?: return Piece(null, null)
+        o.optJSONObject("error")?.let { e ->
+            return Piece(null, Failure(e.optInt("code"), e.optString("message").ifBlank { "stream error" }))
+        }
+        val delta = o.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("delta") ?: return Piece(null, null)
+        return Piece(if (delta.isNull("content")) null else delta.optString("content"), null)
+    }
+
+    /** An answer that came back whole, as it did before streaming. */
+    private fun whole(text: String): String {
+        val root = JSONObject(text)
+        val choices = root.optJSONArray("choices")?.takeIf { it.length() > 0 }
+            ?: root.optJSONObject("error").let { err ->
+                throw Failure(err?.optInt("code") ?: 0, err?.optString("message") ?: "no choices: ${text.take(160)}")
+            }
+        val msg = choices.getJSONObject(0).getJSONObject("message")
+        return if (msg.isNull("content")) "" else msg.optString("content")
+    }
+
     // ---- prompts ----
 
-    val DEEP_SYSTEM: String get() = L.t(
+    val DEEP_SYSTEM: String get() = deepSystem(false)
+
+    /** The deep read's prompt; with [adult] (Tools → Card), sexual subtext is named plainly. */
+    fun deepSystem(adult: Boolean): String = L.t(
         "你帮我（对话里的「我」）看懂这段聊天的潜台词，话是说给我听的：称我为「你」，称对方为「Ta」或 Ta 的名字。" +
             "只说有用的话，不寒暄，不复述原文，不写免责声明。" +
             "有 Ta 的档案就用上：Ta 的性格、喜好、雷区、我们之间的梗，说只对这个人成立的话，别说放在谁身上都对的套话。" +
             "输出三行，每行以「•」开头：第一行说 Ta 此刻真正在意或想要什么（说的是 Ta，不是我）；第二行说我这一步最容易踩的坑；" +
-            "第三行给我一个具体到可以照做的下一步，最后一句是我说的、Ta 还没回时，说清该等还是该补一句、补什么。每行不超过 40 个字。",
+            "第三行给我一个具体到可以照做的下一步，最后一句是我说的、Ta 还没回时，说清该等还是该补一句、补什么。每行不超过 40 个字。" +
+            (if (adult) "性方面的潜台词可以直接说。" else ""),
         "You help me (\"Me\" in the chat) read the subtext of this conversation, and you are talking to me: call me " +
             "\"you\" and the other person \"they\" or their name. Only say what is useful: no pleasantries, no quoting the " +
             "messages back, no disclaimers. If there is a profile of them, use it: their character, likes, sore spots, " +
             "our running jokes. Say what is true of this person, not what would fit anyone. Output three lines, each " +
             "starting with \"•\": what they actually care about or want right now (them, not me); the trap for me in this " +
             "step; one next move for me, concrete enough to do as written. When the last message is mine and they have " +
-            "not answered, say whether to wait or add something, and what. Max 20 words each.")
+            "not answered, say whether to wait or add something, and what. Max 20 words each." +
+            (if (adult) " Sexual subtext can be named plainly." else ""))
 
     /**
      * Drafts of my next message. The old prompt asked for the same three strategies every time
@@ -117,7 +223,13 @@ object OpenRouter {
      * the moment is ([replies] shows that line above the drafts), knows whose turn it is, and
      * writes three different things I would actually send.
      */
-    val REPLY_SYSTEM: String get() = L.t(
+    val REPLY_SYSTEM: String get() = replySystem(false)
+
+    /**
+     * [adult] is the 18+ switch (Tools → Card): drafts may then be as suggestive or explicit as
+     * the chat already is between two adults, following their lead and never past it.
+     */
+    fun replySystem(adult: Boolean): String = L.t(
         "你帮我（对话里的「我」）想下一条要发的消息。先看清局面再写：最后一句是谁说的，Ta 此刻的情绪和意图，我们是什么关系，聊到哪了。\n" +
             "• 像我本人在说话：用我平时对 Ta 的称呼、口头禅、语气词、标点、表情和长短。如果下面附了我以前对 Ta 的真实回复，就照那个味道写，学语气和用词，不要照抄原句。用这段对话本身的语言。\n" +
             "• 每条都要接住最近几句里具体的内容，放进这段对话里读起来自然、有来有回。可以用上 Ta 的喜好、近况和我们的梗，但别硬塞。\n" +
@@ -125,6 +237,9 @@ object OpenRouter {
             "• 判断模型说要给空间时：可以短、可以不追问，但要让 Ta 舒服、好接话，不是冷淡。\n" +
             "• 最后一句是我说的、Ta 还没回：写的是追发的一句，要自然、不追问、不重复我刚说过的、不给压力；这时如果更适合先不发，就在判断里直说。\n" +
             "• 三条要真的不一样：方向、语气或力度不同，但都得是我真会发出去的话。\n" +
+            (if (adult) "• 成年人之间的性话题：Ta 已经在聊性、明显在调情并且乐在其中，或者我们是恋人、以前就这样聊过时，" +
+                "草稿可以同样暧昧、大胆甚至露骨，别自我审查成干巴巴的话。尺度看 Ta 的反应和我们以前的聊法，不要推得比 Ta 表现出来的更远。" +
+                "Ta 说不、犹豫、岔开话题，或者有一点可能未成年，就完全不写这类内容，也不再往那个方向带。\n" else "") +
             "输出：第一行以「判断：」开头，一句话说现在是什么局面、该往哪走，不超过 30 个字。然后三行，分别以「1. 」「2. 」「3. 」开头，每条不超过 40 个字，不加引号，不解释。",
         "You help me (\"Me\" in the chat) write my next message. Read the moment first: who sent the last message, what " +
             "they feel and want right now, what we are to each other, where the conversation is.\n" +
@@ -141,6 +256,11 @@ object OpenRouter {
             "not repeat what I just said and puts no pressure on them; if it is better to send nothing yet, say so in the " +
             "read.\n" +
             "• The three drafts differ for real, in direction, tone or strength, and each is something I would actually send.\n" +
+            (if (adult) "• Sex between adults: when they are already talking about sex, clearly flirting and enjoying it, or we are " +
+                "partners who have talked like this before, drafts can be just as suggestive, bold or explicit; don't sanitize " +
+                "them into something flat. Take the level from their reactions and how we have talked before, never further " +
+                "than they have shown they want. If they say no, hesitate or change the subject, or might be under 18, write " +
+                "none of it and don't steer back there.\n" else "") +
             "Output: a first line starting \"Read: \" saying in one sentence what the moment is and where to take it (max 20 " +
             "words). Then three lines starting \"1. \" \"2. \" \"3. \", max 25 words each, no quotes, no explanations.")
 

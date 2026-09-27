@@ -238,3 +238,88 @@ class ProfileRetryTest {
         assertFalse(Judge.describe(javax.net.ssl.SSLHandshakeException("bad cert")).contains("断了"))
     }
 }
+
+/** Answers arrive as a stream, so the first draft shows while the model writes the rest. */
+class StreamTest {
+
+    @After fun chinese() { L.en = false }
+
+    /** What the tests use in place of org.json: "text:…" is a piece of text, "error:…" an error. */
+    private fun piece(data: String): OpenRouter.Piece = when {
+        data.startsWith("error:") -> OpenRouter.Piece(null, OpenRouter.Failure(0, data.removePrefix("error:")))
+        data.startsWith("text:") -> OpenRouter.Piece(data.removePrefix("text:").replace("\\n", "\n"), null)
+        else -> OpenRouter.Piece(null, null)
+    }
+
+    @Test fun eventLinesAreReadAndCommentsSkipped() {
+        assertEquals("{\"a\":1}", OpenRouter.sseData("data: {\"a\":1}"))
+        assertEquals("[DONE]", OpenRouter.sseData("data:[DONE]"))
+        assertNull(OpenRouter.sseData(": OPENROUTER PROCESSING"))
+        assertNull(OpenRouter.sseData(""))
+        assertNull(OpenRouter.sseData("event: message"))
+    }
+
+    @Test fun eachFinishedLineIsShownAsSoonAsItIsWritten() {
+        val stream = listOf(
+            ": OPENROUTER PROCESSING",
+            "data: text:判断：你刚",
+            "data: text:说完\\n1. 哈哈",
+            "",
+            "data: reasoning-only chunk",
+            "data: text:不看也行\\n2. 开玩笑的",
+            "data: text:啦",
+            "data: [DONE]",
+            "data: text:never read",
+        )
+        val shown = ArrayList<String>()
+        val all = OpenRouter.collect(stream.iterator(), ::piece) { shown += it }
+        assertEquals("判断：你刚说完\n1. 哈哈不看也行\n2. 开玩笑的啦", all)
+        assertEquals(listOf("判断：你刚说完\n", "判断：你刚说完\n1. 哈哈不看也行\n"), shown)
+        // What is shown can already be parsed into the read and the finished drafts.
+        val r = OpenRouter.replies(shown.last())
+        assertEquals("你刚说完", r.read)
+        assertEquals(listOf("哈哈不看也行"), r.drafts)
+    }
+
+    @Test fun anErrorInTheStreamEndsIt() {
+        val stream = listOf("data: text:好", "data: error:Provider disconnected unexpectedly", "data: text:的")
+        val e = assertThrows(OpenRouter.Failure::class.java) { OpenRouter.collect(stream.iterator(), ::piece, null) }
+        assertEquals("Provider disconnected unexpectedly", e.message)
+        assertTrue("a cut-off stream is worth another try", Judge.isTransient(e))
+    }
+
+    @Test fun thinkingIsAskedForAgainOnlyWhenAModelRequiresIt() {
+        val mandatory = OpenRouter.Failure(400, "HTTP 400: {\"error\":{\"message\":\"Reasoning is mandatory for this endpoint and cannot be disabled.\"}}")
+        assertTrue(OpenRouter.thinkingRequired(OpenRouter.Think.OFF, mandatory))
+        assertFalse(OpenRouter.thinkingRequired(OpenRouter.Think.LOW, mandatory))
+        assertFalse(OpenRouter.thinkingRequired(OpenRouter.Think.OFF, OpenRouter.Failure(400, "HTTP 400: bad image")))
+        assertFalse(OpenRouter.thinkingRequired(OpenRouter.Think.OFF, OpenRouter.Failure(401, "HTTP 401: reasoning")))
+    }
+
+    @Test fun theFastestProviderUnlessTheSlugSaysOtherwise() {
+        assertEquals("throughput", OpenRouter.providerSort("deepseek/deepseek-v4.1-flash"))
+        assertEquals("throughput", OpenRouter.providerSort("~anthropic/claude-haiku-latest"))
+        assertNull(OpenRouter.providerSort("deepseek/deepseek-v4-pro:nitro"))
+        assertNull(OpenRouter.providerSort("deepseek/deepseek-v4.1-flash:floor"))
+    }
+
+    @Test fun theOldExperimentalVisionDefaultMovesOn() {
+        assertEquals(Prefs.DEFAULT_FAST, Prefs.fastOrDefault(""))
+        assertEquals(Prefs.DEFAULT_FAST, Prefs.fastOrDefault("  "))
+        assertEquals(Prefs.DEFAULT_FAST, Prefs.fastOrDefault("deepseek/deepseek-v4-flash-vision-exp"))
+        assertEquals("anthropic/claude-haiku-4.5", Prefs.fastOrDefault(" anthropic/claude-haiku-4.5 "))
+    }
+
+    @Test fun adultDraftsOnlyWhenSwitchedOnAndOnlyAtTheirLevel() {
+        assertFalse(OpenRouter.replySystem(false).contains("性话题"))
+        val on = OpenRouter.replySystem(true)
+        for (rule in listOf("性话题", "尺度看 Ta 的反应", "Ta 说不", "未成年")) assertTrue(rule, on.contains(rule))
+        assertTrue("the output format still comes last", on.trimEnd().endsWith("不解释。"))
+        assertTrue(OpenRouter.deepSystem(true).contains("性方面的潜台词"))
+        assertFalse(OpenRouter.deepSystem(false).contains("性方面"))
+        L.en = true
+        val en = OpenRouter.replySystem(true)
+        assertTrue(en.contains("under 18") && en.contains("never further than they have shown they want"))
+        assertFalse(OpenRouter.replySystem(false).contains("under 18"))
+    }
+}

@@ -65,10 +65,22 @@ class Prefs(ctx: Context) {
         get() = sp.getString("deepmodel", DEFAULT_DEEP)?.ifBlank { DEFAULT_DEEP } ?: DEFAULT_DEEP
         set(v) = sp.edit().putString("deepmodel", v.trim()).apply()
 
-    /** Used instead of deepModel when a screenshot is attached, so stickers are actually seen. */
-    var visionModel: String
-        get() = sp.getString("vismodel", DEFAULT_VISION)?.ifBlank { DEFAULT_VISION } ?: DEFAULT_VISION
+    /**
+     * Reply drafts, and every call with a screenshot attached (so stickers are actually seen):
+     * it has to be quick and read images. Deep reads and profiles use [deepModel]. A stored
+     * default of an older version counts as no choice, so it moves on with the default.
+     */
+    var fastModel: String
+        get() = fastOrDefault(sp.getString("vismodel", "") ?: "")
         set(v) = sp.edit().putString("vismodel", v.trim()).apply()
+
+    /**
+     * Reply drafts may be adult when the chat already is, between two adults (18+). Off unless
+     * switched on: the drafts follow the other person's lead and stop at a no.
+     */
+    var adult: Boolean
+        get() = sp.getBoolean("adult", false)
+        set(v) = sp.edit().putBoolean("adult", v).apply()
 
     /**
      * Run the deep model automatically on turns Jev flags as non-routine. Costs roughly a tenth
@@ -173,7 +185,13 @@ class Prefs(ctx: Context) {
         const val DEFAULT_PACKAGES = "com.tencent.mm,cn.soulapp.android,com.facebook.orca," +
             "com.google.android.apps.messaging,com.whatsapp,org.telegram.messenger,com.instagram.android"
         const val DEFAULT_DEEP = "deepseek/deepseek-v4-pro"
-        const val DEFAULT_VISION = "deepseek/deepseek-v4-flash-vision-exp"
+        /** Fast, cheap and reads images natively; replaced V4 Flash Vision Exp on 2026-09-10. */
+        const val DEFAULT_FAST = "deepseek/deepseek-v4.1-flash"
+        /** Defaults of earlier versions for the fast model, which a saved settings page stored as if chosen. */
+        private val RETIRED_FAST = setOf("deepseek/deepseek-v4-flash-vision-exp")
+
+        fun fastOrDefault(stored: String): String =
+            stored.trim().takeIf { it.isNotEmpty() && it !in RETIRED_FAST } ?: DEFAULT_FAST
 
         const val USE_JUDGE = "judge"
         const val USE_DEEP = "deep"

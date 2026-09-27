@@ -4,6 +4,53 @@ APKs for every version are on the [releases page](https://github.com/Neoo-Blue/v
 Each section below is also that release's notes: the Release workflow publishes the section whose
 heading matches the tag.
 
+## 6.7.3
+
+**Faster replies.** Drafts took a long time for four reasons, all fixed:
+- the model thought before writing;
+- nothing showed until the whole answer was done;
+- OpenRouter's default routing leans toward the cheapest provider, and the same DeepSeek model
+  runs anywhere from 4 to 57 tokens a second depending on who serves it;
+- chats read by OCR used an experimental vision model.
+
+Now:
+- Reply drafts use the reply model, default `deepseek/deepseek-v4.1-flash` (DeepSeek's newest,
+  released 2026-09-10; fast, cheap, and it reads screenshots itself). They skip thinking; a
+  model that cannot skip it thinks a little instead.
+- Answers are streamed: the read and each draft show as soon as they are written, and the deep
+  read line by line.
+- Every call goes to the fastest provider for the model, unless its name says how to route
+  (`:nitro`, `:floor`).
+- Tools → Models has a Think and Learn model (default `deepseek/deepseek-v4-pro`, thinks a
+  little) and a Reply and screenshot model. Each has a Test button that shows how long an
+  answer took. If you never changed the old vision model, it moves to the new default.
+- Streaming also keeps long profile writes from sitting silent on the connection.
+
+**Adult replies (18+), off by default** (Setup → Behaviour). When on, drafts can be as
+suggestive or explicit as the chat already is: when they are talking about sex or clearly
+enjoying a flirt, or with a partner you talk like this with. They follow the other person's
+lead and go no further than they have shown they want. Nothing of the kind is written after a
+no, a hesitation or a change of subject, or with anyone who may be under 18. The deep read
+names sexual subtext plainly when it is on.
+
+中文：
+- 回复变快了。以前慢有四个原因：
+  - 模型先思考再写；
+  - 整段写完才显示；
+  - OpenRouter 默认偏向便宜的服务商，同一个 DeepSeek 模型不同服务商每秒 4 到 57 个字不等；
+  - 截图识字的聊天用的是实验版看图模型。
+- 现在：
+  - 回复用新的「回复和看图模型」，默认 `deepseek/deepseek-v4.1-flash`（DeepSeek 9 月 10 日发布的最新款，快、便宜、自己就能看图），不先思考；有的模型不能关掉思考，就只想一点点。
+  - 边写边显示：判断和每条草稿写完一条出一条，深思也一行一行出。
+  - 每次调用都走这个模型最快的服务商（模型名带 `:nitro`、`:floor` 的按它自己说的走）。
+  - 「工具 → 模型」分成「深思和学习」和「回复和看图」两个，各有测试按钮，会显示用了几秒。没改过旧看图模型的会自动换成新默认。
+  - 写档案这种长调用也因为边写边传，不再长时间干等在连接上。
+- 成人内容（18+），默认关，在「设置 → 行为」里打开：
+  - Ta 已经在聊性、明显在调情并且乐在其中，或者你们是恋人、以前就这样聊过时，草稿可以同样暧昧、大胆甚至露骨；
+  - 尺度跟着对方走，不会比 Ta 表现出来的更进一步；
+  - Ta 说不、犹豫、岔开话题，或者有一点可能未成年，就完全不写；
+  - 打开后，深思也会直接说出性方面的潜台词。
+
 ## 6.7.2
 
 **Reply drafts that fit the moment.** In Soul, the strip of quick replies above the reply box

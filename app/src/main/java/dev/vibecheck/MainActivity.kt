@@ -254,6 +254,7 @@ class MainActivity : Activity() {
         addView(tile(null, L.t("行为", "Behaviour")) {
             addView(switch(L.t("启用解读", "Judging on"), prefs.enabled) { prefs.enabled = it; refreshSetup() })
             addView(switch(L.t("值得细看的消息自动深思（只在非闲聊时）", "Auto deep read on turns that matter (not on small talk)"), prefs.autoDeep) { prefs.autoDeep = it })
+            addView(switch(L.t("回复可以带成人内容（18+）：聊到了才写，尺度跟着对方走", "Adult replies (18+): only when the chat already goes there, at their level"), prefs.adult) { prefs.adult = it })
             addView(switch(L.t("读不到界面时用截图识字（微信、Telegram 必须开）", "Read the screen with OCR when an app hides its text (WeChat, Telegram)"), prefs.ocr) { prefs.ocr = it })
             addView(switch(L.t("从后续走向学习（校准风险、重排动作）", "Learn from what happens next (calibrate risk, re-rank moves)"), prefs.learning) { prefs.learning = it })
             addView(switch(L.t("在聊天里顺便记住每个人（只在手机上）", "Remember people while you chat (on this phone only)"), prefs.passive) { prefs.passive = it })
@@ -386,11 +387,14 @@ class MainActivity : Activity() {
             addView(buttons(L.t("导出", "Export") to { exportMemory() }, L.t("导入", "Import") to { importMemory() }))
         }
         "models" -> tile(t, toolName(t), L.t(
-            "深思、回复和学习此人用的 OpenRouter 模型。留空用默认。",
-            "OpenRouter models for Think, Reply and Learn. Leave empty for the default.")) {
-            deepModelField = field(L.t("深思模型", "Deep model"), prefs.deepModel, lines = 1, label = true)
-            visionModelField = field(L.t("看图模型（截图识字的聊天用）", "Vision model (chats read by OCR)"), prefs.visionModel, lines = 1, label = true)
-            addView(buttons(L.t("测试深思模型", "Test deep model") to { testDeep() }))
+            "OpenRouter 模型名，留空用默认。深思和学习要想得深，回复要快，截图识字的聊天也用回复模型看截图。",
+            "OpenRouter model ids; leave empty for the default. Think and Learn want depth, Reply wants speed; chats read by OCR also send their screenshot to the reply model.")) {
+            deepModelField = field(L.t("深思和学习模型", "Think and Learn model"), prefs.deepModel, lines = 1, label = true)
+            visionModelField = field(L.t("回复和看图模型（要快，要能看图）", "Reply and screenshot model (fast, reads images)"), prefs.fastModel, lines = 1, label = true)
+            addView(buttons(
+                L.t("测试深思模型", "Test deep model") to { testModel(deep = true) },
+                L.t("测试回复模型", "Test reply model") to { testModel(deep = false) },
+            ))
         }
         "battery" -> tile(t, toolName(t), L.t(
             "有些手机（小米、OPPO、华为等）会杀掉后台的无障碍服务。把 Vibecheck 设为不受电池优化限制。",
@@ -763,15 +767,20 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun testDeep() {
+    /** One short call with the model as it is used, and how long it took to answer. */
+    private fun testModel(deep: Boolean) {
         saveFields()
         if (prefs.orKey.isBlank()) { toast(L.t("先在设置页填 OpenRouter Key", "Add the OpenRouter key on the Setup tab first")); return }
-        val model = prefs.deepModel
+        // Read after saving: the field may have just changed.
+        val model = if (deep) prefs.deepModel else prefs.fastModel
+        val think = if (deep) OpenRouter.Think.LOW else OpenRouter.Think.OFF
         toast(L.t("测试中…", "Testing…"))
         io.execute {
-            val r = runCatching { OpenRouter.chat(prefs.orKey, model, "Reply with the single word OK.", "ping", null) }
+            val started = System.currentTimeMillis()
+            val r = runCatching { OpenRouter.chat(prefs.orKey, model, "Reply with the single word OK.", "ping", null, think = think) }
+            val secs = "%.1f".format((System.currentTimeMillis() - started) / 1000.0)
             main.post {
-                r.onSuccess { toast(L.t("$model 可用", "$model works")) }
+                r.onSuccess { toast(L.t("$model 可用，$secs 秒", "$model works, ${secs}s")) }
                     .onFailure { toast(L.t("失败：", "Failed: ") + Judge.describe(it)) }
             }
         }
@@ -785,7 +794,7 @@ class MainActivity : Activity() {
         prefs.orKey = orKeyField.text.toString()
         prefs.context = contextField.text.toString()
         deepModelField?.let { prefs.deepModel = it.text.toString() }
-        visionModelField?.let { prefs.visionModel = it.text.toString() }
+        visionModelField?.let { prefs.fastModel = it.text.toString() }
         savePackages()
     }
 

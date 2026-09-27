@@ -11,8 +11,8 @@ android {
         applicationId = "dev.vibecheck"
         minSdk = 26
         targetSdk = 35
-        versionCode = 46
-        versionName = "6.7.2"
+        versionCode = 47
+        versionName = "6.7.3"
     }
 
     // Releases are signed with one fixed key, so each version installs over the one before. The

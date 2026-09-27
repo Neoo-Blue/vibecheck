@@ -1137,9 +1137,11 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         }
         prefs.countUse(if (kind == REPLY) Prefs.USE_REPLY else Prefs.USE_DEEP)
         val c = v.ctx
-        val system = if (kind == REPLY) OpenRouter.REPLY_SYSTEM else OpenRouter.DEEP_SYSTEM
+        val system = if (kind == REPLY) OpenRouter.replySystem(prefs.adult) else OpenRouter.deepSystem(prefs.adult)
+        // Drafts are wanted now: the fast model, no thinking. A deep read can take its time.
+        val think = if (kind == REPLY) OpenRouter.Think.OFF else OpenRouter.Think.LOW
         val send = { image: String? ->
-            val model = if (image != null) prefs.visionModel else prefs.deepModel
+            val model = if (kind == REPLY || image != null) prefs.fastModel else prefs.deepModel
             deepIo.execute {
                 // More than the dozen lines a screen holds, when this chat's kept history lines up with them.
                 val lines = Archive.before(people.archive(c.own), c.transcript, CONTEXT_LINES)
@@ -1159,7 +1161,11 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                     }
                 }
                 val started = System.currentTimeMillis()
-                val r = runCatching { OpenRouter.chat(prefs.orKey, model, system, prompt, image) }
+                // Each finished line goes on the card while the model writes the next.
+                val r = runCatching {
+                    OpenRouter.chat(prefs.orKey, model, system, prompt, image, think = think,
+                        onLine = { text -> main.post { deepPartial(kind, tag, v, title, text) } })
+                }
                 r.onSuccess { Diag.log("deep($model) ok in ${System.currentTimeMillis() - started}ms") }
                     .onFailure { Diag.lastError = "deep: ${it.message}"; Diag.log(Diag.lastError) }
                 main.post { deepDone(kind, tag, v, title, r) }
@@ -1172,16 +1178,36 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         } else send(null)
     }
 
+    /**
+     * A deep read or drafts still being written: the lines done so far replace "Thinking…" on an
+     * open card. A closed card is left alone until the answer is complete.
+     */
+    private fun deepPartial(kind: String, tag: String, v: Verdict, title: String, text: String) {
+        if (tag !in deepInFlight) return
+        val section = sectionFrom(kind, title, text, done = false) ?: return
+        v.sections[kind] = section
+        if (cardShows === v && card.isOpen()) card.setSection(kind, section, openCard = false)
+    }
+
+    /** The panel for an answer; null while nothing of it can be shown yet. */
+    private fun sectionFrom(kind: String, title: String, text: String, done: Boolean): OverlayCard.Section? {
+        if (kind != REPLY) {
+            val lines = text.lines().map { it.trim() }.filter { it.isNotEmpty() }
+            return if (lines.isEmpty() && !done) null else OverlayCard.Section(title, lines.ifEmpty { listOf(text.trim()) })
+        }
+        val r = OpenRouter.replies(text)
+        return when {
+            r.drafts.isNotEmpty() -> OverlayCard.Section(title, r.drafts, pickable = true, read = r.read)
+            !done -> r.read?.let { OverlayCard.Section(title, listOf(L.t("正在写回复…", "Writing the drafts…")), read = it) }
+            else -> OverlayCard.Section(title, listOf(text.trim()), pickable = true, read = r.read)
+        }
+    }
+
     private fun deepDone(kind: String, tag: String, v: Verdict, title: String, r: Result<String>) {
         deepInFlight -= tag
         val wanted = deepWanted.remove(tag)
         val section = r.fold(
-            { text ->
-                if (kind == REPLY) OpenRouter.replies(text).let { r ->
-                    OverlayCard.Section(title, r.drafts.ifEmpty { listOf(text.trim()) }, pickable = true, read = r.read)
-                }
-                else OverlayCard.Section(title, text.lines().map { it.trim() }.filter { it.isNotEmpty() })
-            },
+            { text -> sectionFrom(kind, title, text, done = true)!! },
             { e -> OverlayCard.Section(title, listOf(L.t("失败：", "Failed: ") + Judge.describe(e))) },
         )
         v.sections[kind] = section
