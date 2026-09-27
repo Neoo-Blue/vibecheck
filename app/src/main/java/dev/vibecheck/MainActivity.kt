@@ -59,6 +59,8 @@ class MainActivity : Activity() {
 
     private lateinit var prefs: Prefs
     private lateinit var people: PersonStore
+    private val me by lazy { MeStore(this) }
+    private val meLearner by lazy { MeLearner(me, people, prefs) }
     private val io = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
 
@@ -286,6 +288,8 @@ class MainActivity : Activity() {
             addView(switch(L.t("启用解读", "Judging on"), prefs.enabled) { prefs.enabled = it; refreshSetup() })
             addView(switch(L.t("值得细看的消息自动深思（只在非闲聊时）", "Auto deep read on turns that matter (not on small talk)"), prefs.autoDeep) { prefs.autoDeep = it })
             addView(switch(L.t("回复可以带成人内容（18+）：聊到了才写，尺度跟着对方走", "Adult replies (18+): only when the chat already goes there, at their level"), prefs.adult) { prefs.adult = it })
+            addView(switch(L.t("了解我：跨聊天记下我的日常，每天写个小结，回复照我的生活来写（记录只存在手机上）",
+                "Learn about me: a day log across chats, a write-up of each day, replies drawn from my life (the log stays on this phone)"), prefs.aboutMe) { prefs.aboutMe = it })
             addView(switch(L.t("读不到界面时用截图识字（微信、Telegram 必须开）", "Read the screen with OCR when an app hides its text (WeChat, Telegram)"), prefs.ocr) { prefs.ocr = it })
             addView(switch(L.t("从后续走向学习（校准风险、重排动作）", "Learn from what happens next (calibrate risk, re-rank moves)"), prefs.learning) { prefs.learning = it })
             addView(switch(L.t("在聊天里顺便记住每个人（只在手机上）", "Remember people while you chat (on this phone only)"), prefs.passive) { prefs.passive = it })
@@ -531,6 +535,124 @@ class MainActivity : Activity() {
         peoplePage.post { peoplePage.scrollTo(0, 0) }
     }
 
+    // ---- about me: learned across every chat ----
+
+    private fun showMe() {
+        saveFields()
+        personShown = ME_PAGE
+        peoplePage.removeAllViews()
+        peoplePage.addView(buildMe())
+        peoplePage.post { peoplePage.scrollTo(0, 0) }
+    }
+
+    /** "我" at the top of the People list. */
+    private fun meCard(): View = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(16), dp(12), dp(16), dp(12))
+        background = rounded(chipBg(), dp(14))
+        layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(10) }
+        addView(text(L.t("我", "Me"), 16f, fg(), bold = true))
+        val days = me.days()
+        val facts = listOfNotNull(
+            if (me.profile.isNotBlank()) L.t("关于我的档案已整理", "profile written") else L.t("档案还没整理", "no profile yet"),
+            days.size.takeIf { it > 0 }?.let { L.t("记了 $it 天", "$it days logged") },
+        )
+        addView(text(facts.joinToString("  ·  "), 13f, sub()).apply { setPadding(0, dp(2), 0, 0) })
+        val line = Me.oneLine(me.profile)
+            ?: me.summaries(1).firstOrNull()?.second?.lines()?.firstOrNull { it.isNotBlank() }?.trim()?.removePrefix("•")?.trim()
+            ?: L.t("学习联系人时会顺便学你，每天的聊天也会记下来。点这里看。", "Learning someone teaches it about you too, and each day's chats are logged. Tap to see.")
+        addView(text(line, 14f, fg()).apply { maxLines = 2; setPadding(0, dp(4), 0, 0) })
+        isClickable = true
+        setOnClickListener { showMe() }
+    }
+
+    /**
+     * Everything learned about me: the profile of me, section by section; each day written up;
+     * how I write across chats; and the buttons to write it again or forget it.
+     */
+    private fun buildMe(): View = column().apply {
+        addView(LinearLayout(this@MainActivity).apply {
+            setPadding(0, dp(6), 0, 0)
+            addView(pill(L.t("← 所有人", "← Everyone"), false) { showPeople() })
+        })
+
+        val learned = me.learnedAt.takeIf { it > 0 }?.let {
+            L.t("整理于 ", "Written ") + SimpleDateFormat(L.t("M月d日 HH:mm", "MMM d, HH:mm"), Locale.getDefault()).format(Date(it))
+        }
+        addView(tile(null, L.t("关于我", "About me"), learned) {
+            val secs = Profile.sections(me.profile)
+            if (secs.isEmpty()) addView(text(L.t(
+                "还没整理：学习一个人时会顺便从你们的聊天里学你，每天的聊天也会记下来，第二天写成小结。也可以点下面的「整理关于我的档案」。",
+                "Not written yet: learning someone also learns about you from your chats with them, and each day's chats are logged and written up the next day. Or tap \"Write my profile\" below."), 14f, fg()))
+            for (sec in secs) {
+                if (sec.heading.isNotEmpty()) addView(text(sec.heading, 14f, accent(), bold = true).apply { setPadding(0, dp(10), 0, dp(2)) })
+                for (l in sec.lines) addView(text(l, 14f, fg()).apply { setTextIsSelectable(true); setPadding(0, dp(1), 0, dp(1)) })
+            }
+        })
+
+        val today = Me.day(System.currentTimeMillis())
+        addView(tile(null, L.t("每天", "Day by day"), L.t(
+            "在各个聊天里说的话按天记下，第二天由模型写成几行小结。回复草稿会参考最近几天和今天在别的聊天里说过的话。",
+            "What is said in each chat is logged by day and written up the next day. Reply drafts draw on the last few days and on what you said in other chats today.")) {
+            val n = me.lines(today).size
+            addView(text(L.t("今天：记了 $n 条", "Today: $n messages logged"), 14f, fg(), bold = true))
+            me.summary(today)?.let { addView(text(it, 14f, fg()).apply { setTextIsSelectable(true); setPadding(0, dp(2), 0, 0) }) }
+            if (n > 0) addView(buttons(L.t("总结今天", "Write up today") to { summarizeToday() }))
+            for (d in me.days().filter { it != today }.take(30)) {
+                addView(text(Me.dayLabel(d), 14f, accent(), bold = true).apply { setPadding(0, dp(10), 0, dp(2)) })
+                addView(text(me.summary(d) ?: L.t("还没写小结（${me.lines(d).size} 条）", "Not written up yet (${me.lines(d).size} messages)"), 14f, fg())
+                    .apply { setTextIsSelectable(true) })
+            }
+        })
+
+        val records = people.index().map { people.loadId(it) }
+        val style = Person.Style().also { st -> records.forEach { Person.mergeStyle(st, it.style) } }
+        Person.styleSummary(style)?.let { summary ->
+            addView(tile(null, L.t("你在各个聊天里", "You across chats")) {
+                addView(text(summary, 14f, fg()))
+                addView(text(L.t("和 ${records.count { it.style.msgs > 0 }} 个人聊过", "Talked with ${records.count { it.style.msgs > 0 }} people"), 13f, sub()).apply { setPadding(0, dp(4), 0, 0) })
+            })
+        }
+
+        addView(tile(null, L.t("更多", "More")) {
+            addView(wrapRow(listOf(
+                pill(L.t("整理关于我的档案", "Write my profile"), false) { rebuildMe() },
+                pill(L.t("清空关于我的记忆", "Forget about me"), false) {
+                    confirm(L.t("清空每天的记录、小结和关于你的档案？不能撤销。", "Delete the day log, the write-ups and your profile? This can't be undone."), L.t("清空", "Delete")) {
+                        me.clear(); toast(L.t("已清空", "Deleted")); showMe()
+                    }
+                },
+            )))
+            addView(hint(L.t("不想记：设置 → 行为 → 了解我。", "To stop: Setup → Behaviour → Learn about me.")))
+        })
+    }
+
+    private fun summarizeToday() {
+        if (prefs.orKey.isBlank()) { toast(L.t("先在设置页填 OpenRouter Key", "Add the OpenRouter key on the Setup tab first")); return }
+        toast(L.t("正在总结今天…", "Writing up today…"))
+        io.execute {
+            val r = runCatching { meLearner.summarizeToday(System.currentTimeMillis()) }
+            main.post {
+                r.onSuccess { toast(if (it == null) L.t("今天还没记下什么", "Nothing logged today yet") else L.t("今天的小结写好了", "Today is written up")) }
+                    .onFailure { toast(L.t("失败：", "Failed: ") + Judge.describe(it)) }
+                if (personShown == ME_PAGE) showMe()
+            }
+        }
+    }
+
+    private fun rebuildMe() {
+        if (prefs.orKey.isBlank()) { toast(L.t("先在设置页填 OpenRouter Key", "Add the OpenRouter key on the Setup tab first")); return }
+        toast(L.t("正在整理关于你的档案，可能要一两分钟…", "Writing your profile; this can take a minute or two…"))
+        io.execute {
+            val r = runCatching { meLearner.rebuild() }
+            main.post {
+                r.onSuccess { toast(L.t("关于你的档案整理好了", "Your profile is written")) }
+                    .onFailure { toast(L.t("没整理成：", "Not written: ") + Judge.describe(it)) }
+                if (personShown == ME_PAGE) showMe()
+            }
+        }
+    }
+
     private fun buildPeople(query: String): View = column().apply {
         val all = people.entries()
         addView(tile(null, L.t("人物记忆", "People"), L.t(
@@ -547,6 +669,7 @@ class MainActivity : Activity() {
                 },
             ))
         })
+        if (prefs.aboutMe || me.profile.isNotBlank()) addView(meCard())
         if (all.isEmpty()) {
             addView(hint(L.t("还没认识任何人：打开一个聊天，边上出现小气泡后就开始记了。", "Nobody yet: open a chat, and once the bubble shows, people are remembered.")))
             return@apply
@@ -1138,6 +1261,8 @@ class MainActivity : Activity() {
         private const val TAB_SETUP = 0
         private const val TAB_TOOLS = 1
         private const val TAB_PEOPLE = 2
+        /** [personShown] while the page about me is open. */
+        private const val ME_PAGE = "\u0000me"
 
         fun guide(): String = L.t(
             "用法\n" +

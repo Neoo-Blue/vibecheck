@@ -241,6 +241,7 @@ object OpenRouter {
             "• 判断模型说要给空间时：可以短、可以不追问，但要让 Ta 舒服、好接话，不是冷淡。\n" +
             "• 最后一句是我说的、Ta 还没回：写的是追发的一句，要自然、不追问、不重复我刚说过的、不给压力；这时如果更适合先不发，就在判断里直说。\n" +
             "• 三条要真的不一样：方向、语气或力度不同，但都得是我真会发出去的话。\n" +
+            "• 下面有「关于我」时，可以自然地用上我最近在忙的事、今天做过的事、我的爱好，说话照我的方式；只用写着的，不编。\n" +
             (if (adult) "• 成年人之间的性话题：Ta 已经在聊性、明显在调情并且乐在其中，或者我们是恋人、以前就这样聊过时，" +
                 "草稿可以同样暧昧、大胆甚至露骨，别自我审查成干巴巴的话。尺度看 Ta 的反应和我们以前的聊法，不要推得比 Ta 表现出来的更远。" +
                 "Ta 说不、犹豫、岔开话题，或者有一点可能未成年，就完全不写这类内容，也不再往那个方向带。\n" else "") +
@@ -260,6 +261,8 @@ object OpenRouter {
             "not repeat what I just said and puts no pressure on them; if it is better to send nothing yet, say so in the " +
             "read.\n" +
             "• The three drafts differ for real, in direction, tone or strength, and each is something I would actually send.\n" +
+            "• Where \"About me\" is given, draw on what I have been busy with, what I did today and what I like, in my own " +
+            "way of talking, where it fits; only what is written there, nothing made up.\n" +
             (if (adult) "• Sex between adults: when they are already talking about sex, clearly flirting and enjoying it, or we are " +
                 "partners who have talked like this before, drafts can be just as suggestive, bold or explicit; don't sanitize " +
                 "them into something flat. Take the level from their reactions and how we have talked before, never further " +
@@ -323,12 +326,14 @@ object OpenRouter {
         relationship: String? = null,
         closeness: String? = null,
         profile: String? = null,
+        me: String? = null,
     ): String = buildString {
         append(L.t("对方：", "Them: ")).append(peer).append('\n')
         val who = listOfNotNull(relationship?.takeIf { it.isNotBlank() }, closeness?.takeIf { it.isNotBlank() })
         if (who.isNotEmpty()) append(L.t("我和对方的关系：", "Relationship: ")).append(who.joinToString(" · ") { L.label(it) }).append('\n')
         if (note.isNotBlank()) append(L.t("关系背景：", "Context: ")).append(note).append('\n')
         profile?.takeIf { it.isNotBlank() }?.let { append(L.t("\nTa 的档案（从我们的全部聊天记录里学的）：\n", "\nTheir profile (learned from our whole history):\n")).append(it.trim()).append("\n\n") }
+        me?.takeIf { it.isNotBlank() }?.let { append(L.t("\n关于我（从我所有的聊天里学的）：\n", "\nAbout me (learned across all my chats):\n")).append(it.trim()).append("\n\n") }
         style?.let { append(L.t("我平时的说话方式：", "How I usually write: ")).append(it).append('\n') }
         history?.let { append(L.t("我们最近几轮的走向：", "Where the last few turns went: ")).append(it).append('\n') }
         relation?.let { append(L.t("这段关系的长期观察：", "Long-term observations: ")).append(it).append('\n') }

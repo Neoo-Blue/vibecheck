@@ -60,6 +60,14 @@ class Prefs(ctx: Context) {
         get() = sp.getBoolean("passive", true)
         set(v) = sp.edit().putBoolean("passive", v).apply()
 
+    /**
+     * Learn about me across chats: keep a day log of what is said live, write each day up, and a
+     * profile of me that reply drafts follow. The log stays on the phone.
+     */
+    var aboutMe: Boolean
+        get() = sp.getBoolean("aboutme", true)
+        set(v) = sp.edit().putBoolean("aboutme", v).apply()
+
     /** "zh" or "en", defaulting to the phone's language. Applied to L on every read so the service and the settings screen agree. */
     var lang: String
         get() = (sp.getString("lang", null) ?: if (Locale.getDefault().language == "zh") "zh" else "en")

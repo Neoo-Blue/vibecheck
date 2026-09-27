@@ -89,12 +89,16 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     /** Writing a profile: one coordinator per person, and the notes on stretches of history three at a time. */
     private val profileIo = Executors.newSingleThreadExecutor { Thread(it, "vibecheck-profile") }
     private val notesIo = Executors.newFixedThreadPool(3) { Thread(it, "vibecheck-notes") }
+    /** Learning about me: day write-ups and the profile of me, one at a time. */
+    private val meIo = Executors.newSingleThreadExecutor { Thread(it, "vibecheck-me") }
     /** Screenshot callbacks: off the main thread (a debug route blocks on one) and never behind a network call. */
     private val shotIo = Executors.newSingleThreadExecutor { Thread(it, "vibecheck-shot") }
 
     private lateinit var prefs: Prefs
     private lateinit var card: OverlayCard
     private lateinit var people: PersonStore
+    private val me by lazy { MeStore(this) }
+    private val meLearner by lazy { MeLearner(me, people, prefs) }
     private var server: DebugServer? = null
     /** The watched packages, re-read when the setting changes rather than split apart on every event. */
     private var watched: Set<String> = emptySet()
@@ -341,6 +345,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         judgeIo.shutdownNow()
         deepIo.shutdownNow()
         profileIo.shutdownNow()
+        meIo.shutdownNow()
         notesIo.shutdownNow()
         shotIo.shutdownNow()
         super.onDestroy()
@@ -593,6 +598,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         // An unreadable name shares one record between people, so nothing is learned into it.
         if (prefs.passive && name != UNKNOWN) observePassively(record, bubbles, entering)
         resumeProfile(id)
+        checkDay()
         Diag.person = "${displayName(record)} (${record.stats.theirMsgs + record.stats.myMsgs} seen, ${record.model.updates} updates)"
 
         // Judging costs money and there is nowhere to show it, so stop here when judging is off.
@@ -979,6 +985,9 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             fresh.filter { !it.incoming }.forEach { Person.observe(record.style, it.text) }
             val now = System.currentTimeMillis()
             Relation.observe(record.stats, fresh, now, live = sync.aligned, tzOffsetMs = TimeZone.getDefault().getOffset(now).toLong())
+            // Across every chat, what is said as it happens goes into the day log: what I did today,
+            // and with whom. Not lines that only look new because the chat was opened after a while.
+            if (prefs.aboutMe && sync.aligned) me.log(now, displayName(record), sync.fresh)
             Diag.log("passive: +${fresh.size} → ${record.name}")
         }
         if (sync.fresh.isNotEmpty() || changed) people.save(record)
@@ -1149,9 +1158,15 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             deepIo.execute {
                 // More than the dozen lines a screen holds, when this chat's kept history lines up with them.
                 val lines = Archive.before(people.archive(c.own), c.transcript, CONTEXT_LINES)
+                // What I am like, what I have been up to, what I said elsewhere today.
+                val about = if (!prefs.aboutMe) null else listOfNotNull(
+                    Me.brief(me.profile, me.summaries(3)),
+                    Me.elsewhereToday(me.lines(Me.day(System.currentTimeMillis())), c.name)
+                        ?.let { L.t("我今天在别的聊天里说过：\n", "What I said in other chats today:\n") + it },
+                ).joinToString("\n").ifBlank { null }
                 var prompt = OpenRouter.deepPrompt(
                     c.name, c.note, c.style, c.history, c.relation,
-                    lines, c.answers, c.viaOcr, image != null, c.situation, c.relationship, c.closeness, c.profile,
+                    lines, c.answers, c.viaOcr, image != null, c.situation, c.relationship, c.closeness, c.profile, about,
                 )
                 // Drafts in my voice: how I actually answered this person before, from the kept history.
                 if (kind == REPLY) {
@@ -1556,6 +1571,46 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             ) + p.profile.lines().map { it.trim() }.filter { it.isNotEmpty() })
         // The card on screen was judged without this profile: the next scan sees that and judges again.
         if (activeId == id) rescanSoon()
+        // A history read about someone says things about me too.
+        refreshMe()
+    }
+
+    // ---- learning about me ----
+
+    private var dayChecked = ""
+    private var dayBusy = false
+    private var dayRetryAt = 0L
+    private var meBusy = false
+
+    /** Once a day: the days before today that have a log are written up, and old logs go. */
+    private fun checkDay() {
+        val now = System.currentTimeMillis()
+        val today = Me.day(now)
+        if (!prefs.aboutMe || today == dayChecked || dayBusy || now < dayRetryAt || prefs.orKey.isBlank()) return
+        dayBusy = true
+        meIo.execute {
+            val r = runCatching { me.prune(); meLearner.summarizeDays(today) }
+            r.onSuccess { if (it > 0) Diag.log("me: $it day(s) written up") }.onFailure { Diag.log("me: day write-up failed ${it.message}") }
+            main.post {
+                dayBusy = false
+                if (r.isSuccess) dayChecked = today else dayRetryAt = System.currentTimeMillis() + 10 * 60_000L
+                // New days written up: the profile of me follows them every few days, and is first
+                // written from days alone for someone who has not learned anyone yet.
+                if ((r.getOrNull() ?: 0) > 0 && (me.profile.isBlank() || System.currentTimeMillis() - me.learnedAt > 3 * 86_400_000L)) refreshMe()
+            }
+        }
+    }
+
+    /** The profile of me, written again from everything learned so far. */
+    private fun refreshMe() {
+        if (!prefs.aboutMe || prefs.orKey.isBlank() || meBusy) return
+        meBusy = true
+        meIo.execute {
+            runCatching { meLearner.rebuild() }
+                .onSuccess { Diag.log("me: profile written") }
+                .onFailure { Diag.log("me: profile failed ${it.message}") }
+            main.post { meBusy = false }
+        }
     }
 
     /** What a history read produced goes on that person's card, and only there. */
