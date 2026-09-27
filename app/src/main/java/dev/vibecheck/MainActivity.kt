@@ -50,9 +50,10 @@ import java.util.Locale
 import java.util.concurrent.Executors
 
 /**
- * The dashboard. "Setup" holds only what it takes to get going; "Tools" holds everything else
- * as tiles. Any tile can be hidden with one tap and brought back from the bottom of the Tools
- * tab, so the screen shows only what you actually use. Everything saves by itself.
+ * The dashboard. "Setup" holds what it takes to get going, the models included; "People" shows
+ * everyone remembered and, for each, what was learned; "Tools" holds everything else as tiles.
+ * Any tool can be hidden with one tap and brought back from the bottom of the Tools tab, so the
+ * screen shows only what you actually use. Everything saves by itself.
  */
 class MainActivity : Activity() {
 
@@ -67,20 +68,19 @@ class MainActivity : Activity() {
     private lateinit var contextField: EditText
     private lateinit var extraPkgs: EditText
     private var appBoxes = listOf<Pair<String, CheckBox>>()
-    private var deepModelField: EditText? = null
-    private var visionModelField: EditText? = null
     private var loaded = false
 
     private lateinit var readiness: TextView
     private lateinit var checklist: LinearLayout
     private lateinit var setupPage: ScrollView
     private lateinit var toolsPage: ScrollView
+    private lateinit var peoplePage: ScrollView
     private lateinit var tabSetup: TextView
     private lateinit var tabTools: TextView
+    private lateinit var tabPeople: TextView
 
     // Tool tiles that show live numbers; null while the tile is hidden.
     private var pauseText: TextView? = null
-    private var peopleText: TextView? = null
     private var usageText: TextView? = null
     private var batteryText: TextView? = null
     private var diagnostics: TextView? = null
@@ -100,9 +100,11 @@ class MainActivity : Activity() {
         root.addView(tabs())
         setupPage = page(buildSetup())
         toolsPage = page(buildTools())
+        peoplePage = page(buildPeople(""))
         val pages = FrameLayout(this)
         pages.addView(setupPage)
         pages.addView(toolsPage)
+        pages.addView(peoplePage)
         root.addView(pages, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
         applyInsets(root)
         setContentView(root)
@@ -121,14 +123,21 @@ class MainActivity : Activity() {
     private fun openPerson(intent: Intent?) {
         val id = intent?.getStringExtra(EXTRA_PERSON) ?: return
         intent.removeExtra(EXTRA_PERSON)
-        selectTab(1)
-        personDetail(id, focusName = true)
+        selectTab(TAB_PEOPLE)
+        showPerson(id, focusName = true)
+    }
+
+    /** Back from a person's page goes to the list, not out of the app. */
+    @Deprecated("Deprecated in Android 13; still called without the predictive back opt-in")
+    override fun onBackPressed() {
+        if (prefs.tab == TAB_PEOPLE && personShown != null) showPeople() else @Suppress("DEPRECATION") super.onBackPressed()
     }
 
     override fun onResume() {
         super.onResume()
         refreshSetup()
         refreshTools()
+        refreshPeople()
     }
 
     override fun onPause() {
@@ -170,20 +179,29 @@ class MainActivity : Activity() {
     private fun tabs(): View = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
         setPadding(dp(16), dp(10), dp(16), dp(6))
-        tabSetup = tab(L.t("设置", "Setup")) { selectTab(0) }
-        tabTools = tab(L.t("工具", "Tools")) { selectTab(1) }
+        tabSetup = tab(L.t("设置", "Setup")) { selectTab(TAB_SETUP) }
+        tabPeople = tab(L.t("人物", "People")) { selectTab(TAB_PEOPLE) }
+        tabTools = tab(L.t("工具", "Tools")) { selectTab(TAB_TOOLS) }
         addView(tabSetup, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        addView(tabPeople, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { leftMargin = dp(8) })
         addView(tabTools, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { leftMargin = dp(8) })
     }
 
     private fun selectTab(i: Int) {
         saveFields()
-        prefs.tab = i
-        setupPage.visibility = if (i == 1) View.GONE else View.VISIBLE
-        toolsPage.visibility = if (i == 1) View.VISIBLE else View.GONE
-        styleTab(tabSetup, i != 1)
-        styleTab(tabTools, i == 1)
-        if (i == 1) refreshTools() else refreshSetup()
+        val tab = if (i == TAB_TOOLS || i == TAB_PEOPLE) i else TAB_SETUP
+        prefs.tab = tab
+        setupPage.visibility = if (tab == TAB_SETUP) View.VISIBLE else View.GONE
+        toolsPage.visibility = if (tab == TAB_TOOLS) View.VISIBLE else View.GONE
+        peoplePage.visibility = if (tab == TAB_PEOPLE) View.VISIBLE else View.GONE
+        styleTab(tabSetup, tab == TAB_SETUP)
+        styleTab(tabPeople, tab == TAB_PEOPLE)
+        styleTab(tabTools, tab == TAB_TOOLS)
+        when (tab) {
+            TAB_TOOLS -> refreshTools()
+            TAB_PEOPLE -> refreshPeople()
+            else -> refreshSetup()
+        }
     }
 
     private fun switchLang(want: String) {
@@ -232,6 +250,19 @@ class MainActivity : Activity() {
             addView(buttons(L.t("测试", "Test") to { testEngine() }))
         })
 
+        addView(tile(null, L.t("模型", "Models"), L.t(
+            "OpenRouter 上用哪个模型。回复模型写回复草稿、看截图识字的聊天截图，要会写、要快；深思模型做深度分析和学习此人。",
+            "Which OpenRouter models to use. The reply model writes drafts and looks at the screenshots of chats read by OCR: it should write well and fast. The Think model does deep reads and Learn.")) {
+            addView(text(L.t("回复", "Replies"), 14f, fg(), bold = true).apply { setPadding(0, dp(6), 0, dp(4)) })
+            addView(modelChoices(Models.REPLY, { prefs.fastModel }) { prefs.fastModel = it })
+            addView(text(L.t("深思和学习", "Think and Learn"), 14f, fg(), bold = true).apply { setPadding(0, dp(10), 0, dp(4)) })
+            addView(modelChoices(Models.DEEP, { prefs.deepModel }) { prefs.deepModel = it })
+            addView(buttons(
+                L.t("测试回复模型", "Test reply model") to { testModel(deep = false) },
+                L.t("测试深思模型", "Test Think model") to { testModel(deep = true) },
+            ))
+        })
+
         addView(tile(null, L.t("在这些应用里解读", "Watch these apps"), L.t(
             "Discord 和 Slack 把所有消息都放在左边，分不出谁说的，所以不在列表里。",
             "Discord and Slack put every message on the left, so it can't tell who said what; they're left out.")) {
@@ -262,10 +293,10 @@ class MainActivity : Activity() {
 
         addView(tile(null, L.t("通用背景", "General context"), L.t(
             "只发给还没有专属背景、也没学习过的人。别在这里写某一个人（比如对象）：那会被当成所有人的背景。" +
-                "每个人是你的什么人、专属背景：工具 → 人物记忆，或卡片上的 ⋯ → 关系。",
+                "每个人是你的什么人、专属背景：「人物」页，或卡片上的 ⋯ → 关系。",
             "Sent only for people with no context of their own and no profile. Don't describe one person here " +
                 "(your partner, say): it would apply to everyone. Who each person is to you, and their own context: " +
-                "Tools → People, or ⋯ → Relationship on the card.")) {
+                "the People tab, or ⋯ → Relationship on the card.")) {
             contextField = field(L.t("例：我说话比较直，不太会哄人", "e.g. I'm blunt and not great at comforting people"), prefs.context, lines = 2)
         })
 
@@ -306,8 +337,7 @@ class MainActivity : Activity() {
     // ---- Tools: every extra, each one hideable ----
 
     private fun buildTools(): View = column().apply {
-        pauseText = null; peopleText = null; usageText = null; batteryText = null; diagnostics = null; diagUrl = null
-        deepModelField = null; visionModelField = null
+        pauseText = null; usageText = null; batteryText = null; diagnostics = null; diagUrl = null
         val hidden = prefs.hiddenTools
         addView(hint(L.t("用不到的工具点「隐藏」，想要时在最下面找回。", "Hide what you don't use; bring it back from the bottom of this tab.")))
         for (t in TOOLS) if (t !in hidden) addView(tool(t))
@@ -321,11 +351,9 @@ class MainActivity : Activity() {
 
     private fun toolName(t: String): String = when (t) {
         "pause" -> L.t("暂停", "Pause")
-        "people" -> L.t("人物记忆", "People")
         "card" -> L.t("卡片", "Card")
         "usage" -> L.t("用量", "Usage")
         "backup" -> L.t("备份", "Backup")
-        "models" -> L.t("模型", "Models")
         "battery" -> L.t("保持运行", "Keep it running")
         "diagnostics" -> L.t("诊断", "Diagnostics")
         else -> L.t("使用说明", "How it works")
@@ -338,20 +366,6 @@ class MainActivity : Activity() {
                 L.t("暂停 1 小时", "1 hour") to { snooze(60 * 60_000L) },
                 L.t("到明早 8 点", "Until 8 am") to { snooze(untilMorning() - System.currentTimeMillis()) },
                 L.t("恢复", "Resume") to { prefs.snoozeUntil = 0L; refreshTools() },
-            ))
-        }
-        "people" -> tile(t, toolName(t), L.t(
-            "每个人单独学习，全部存在手机上。在「管理」里查看学到了什么、写专属背景、暂停、合并或忘记。",
-            "Each person is learned separately, all on this phone. Manage to see what was learned, add a note, pause, merge or forget.")) {
-            peopleText = text("", 14f, fg()).also { addView(it) }
-            addView(buttons(
-                L.t("管理", "Manage") to { managePeople() },
-                L.t("清理空记录", "Clean up") to { cleanUp() },
-                L.t("全部忘记", "Forget all") to {
-                    confirm(L.t("忘记所有人？学到的一切都会删除，不能撤销。", "Forget everyone? Everything learned is deleted and can't be undone."), L.t("全部忘记", "Forget all")) {
-                        people.forgetAll(); refreshTools(); toast(L.t("已清空", "Cleared"))
-                    }
-                },
             ))
         }
         "card" -> tile(t, toolName(t), L.t("拖动气泡可以换位置，长按气泡打开菜单。", "Drag the bubble to move it; long-press it for the menu.")) {
@@ -385,16 +399,6 @@ class MainActivity : Activity() {
             "把人物记忆导出成文件，换手机时导入。API Key 和聊天记录存档不在里面（存档到新手机上再学习一次就有）。",
             "Save people memory to a file and bring it back on a new phone. API keys and kept chat histories are not included (Learn again on the new phone).")) {
             addView(buttons(L.t("导出", "Export") to { exportMemory() }, L.t("导入", "Import") to { importMemory() }))
-        }
-        "models" -> tile(t, toolName(t), L.t(
-            "OpenRouter 模型名，留空用默认。深思和学习要想得深，回复要快，截图识字的聊天也用回复模型看截图。",
-            "OpenRouter model ids; leave empty for the default. Think and Learn want depth, Reply wants speed; chats read by OCR also send their screenshot to the reply model.")) {
-            deepModelField = field(L.t("深思和学习模型", "Think and Learn model"), prefs.deepModel, lines = 1, label = true)
-            visionModelField = field(L.t("回复和看图模型（要快，要能看图）", "Reply and screenshot model (fast, reads images)"), prefs.fastModel, lines = 1, label = true)
-            addView(buttons(
-                L.t("测试深思模型", "Test deep model") to { testModel(deep = true) },
-                L.t("测试回复模型", "Test reply model") to { testModel(deep = false) },
-            ))
         }
         "battery" -> tile(t, toolName(t), L.t(
             "有些手机（小米、OPPO、华为等）会杀掉后台的无障碍服务。把 Vibecheck 设为不受电池优化限制。",
@@ -447,7 +451,6 @@ class MainActivity : Activity() {
     private fun refreshTools() {
         pauseText?.text = if (prefs.snoozed) L.t("已暂停，到 ${hhmm(prefs.snoozeUntil)} 恢复", "Paused until ${hhmm(prefs.snoozeUntil)}")
             else L.t("正在解读", "Judging is on")
-        peopleText?.text = L.t("记住了 ${people.index().size} 个人", "${people.index().size} people remembered")
         usageText?.text = usage()
         batteryText?.text = if (getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(packageName))
             L.t("✓ 已不受电池优化限制", "✓ Not restricted by battery optimisation")
@@ -504,100 +507,223 @@ class MainActivity : Activity() {
         else L.t("排查接口已关闭", "Debug endpoint is off")
     }
 
-    // ---- people ----
+    // ---- People: everyone remembered, and what was learned about each ----
 
-    private fun managePeople() {
-        val all = people.entries()
-        if (all.isEmpty()) { toast(L.t("还没认识任何人", "Nobody remembered yet")); return }
-        val box = column().apply { setPadding(dp(20), dp(4), dp(20), 0) }
-        val search = EditText(this).apply { hint = L.t("搜索名字或应用", "Search name or app"); isSingleLine = true }
-        box.addView(search)
-        val list = ListView(this)
-        box.addView(list, LinearLayout.LayoutParams(MATCH_PARENT, (resources.displayMetrics.heightPixels * 0.5f).toInt()))
-        var shown = all
-        fun label(e: PersonStore.Entry): CharSequence = SpannableStringBuilder(nameLabel(e.id, 16f)).apply {
-            append("  ·  ").append(e.apps.joinToString("+") { Apps.label(it) })
-            append("  ·  ").append(L.t("${e.messages} 条", "${e.messages} msgs"))
-            if (e.muted) append(L.t("  ·  已暂停", "  ·  paused"))
-        }
-        fun fill() { list.adapter = ArrayAdapter<CharSequence>(this, android.R.layout.simple_list_item_1, shown.map { label(it) }) }
-        fill()
-        val dialog = AlertDialog.Builder(this)
-            .setTitle(L.t("人物记忆（${all.size}）", "People (${all.size})"))
-            .setView(box)
-            .setNegativeButton(L.t("关闭", "Close"), null)
-            .create()
-        search.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
-            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
-            override fun afterTextChanged(s: Editable?) {
-                val q = s?.toString()?.trim().orEmpty()
-                shown = if (q.isEmpty()) all else all.filter { e ->
-                    e.name.contains(q, ignoreCase = true) || e.apps.any { Apps.label(it).contains(q, ignoreCase = true) }
-                }
-                fill()
-            }
-        })
-        list.onItemClickListener = AdapterView.OnItemClickListener { _, _, pos, _ ->
-            shown.getOrNull(pos)?.let { dialog.dismiss(); personDetail(it.id) }
-        }
-        dialog.show()
+    /** The person whose page is open on the People tab, or null for the list. */
+    private var personShown: String? = null
+
+    /** The list again, unless a person's page is open (it may have a half-typed note on it). */
+    private fun refreshPeople() {
+        if (::peoplePage.isInitialized && personShown == null) showPeople()
     }
 
-    private fun personDetail(id: String, focusName: Boolean = false) {
-        val r = people.loadId(id)
-        val box = column().apply { setPadding(dp(20), dp(4), dp(20), 0) }
-        if (r.muted) box.addView(text(L.t("已暂停：不解读，也不记录。", "Paused: not judged, nothing recorded."), 13f, warn()))
-        // A name for chats whose own cannot be read: OCR does not see emoji.
-        box.addView(text(L.t("名字", "Name"), 13f, fg()).apply { setPadding(0, dp(8), 0, 0) })
-        people.namePicture(id)?.let {
-            box.addView(text("", 13f, sub()).apply {
-                text = SpannableStringBuilder(L.t("聊天标题上是：", "The chat title shows: ")).append(nameLabel(id, 18f))
-            })
+    private fun showPeople(query: String = "") {
+        personShown = null
+        peoplePage.removeAllViews()
+        peoplePage.addView(buildPeople(query))
+    }
+
+    private fun showPerson(id: String, focusName: Boolean = false) {
+        saveFields()
+        personShown = id
+        peoplePage.removeAllViews()
+        peoplePage.addView(buildPerson(id, focusName))
+        peoplePage.post { peoplePage.scrollTo(0, 0) }
+    }
+
+    private fun buildPeople(query: String): View = column().apply {
+        val all = people.entries()
+        addView(tile(null, L.t("人物记忆", "People"), L.t(
+            "每个人单独学习，全部只存在这台手机上。点一个人，看学到了什么，改关系、名字和专属背景。",
+            "Each person is learned separately, all on this phone only. Tap someone to see what was learned, and to change their relationship, name or context.")) {
+            addView(text(L.t("记住了 ${all.size} 个人，学习过 ${all.count { it.learned > 0 }} 个",
+                "${all.size} people remembered, ${all.count { it.learned > 0 }} learned"), 14f, fg()))
+            addView(buttons(
+                L.t("清理空记录", "Clean up") to { cleanUp() },
+                L.t("全部忘记", "Forget all") to {
+                    confirm(L.t("忘记所有人？学到的一切都会删除，不能撤销。", "Forget everyone? Everything learned is deleted and can't be undone."), L.t("全部忘记", "Forget all")) {
+                        people.forgetAll(); showPeople(); toast(L.t("已清空", "Cleared"))
+                    }
+                },
+            ))
+        })
+        if (all.isEmpty()) {
+            addView(hint(L.t("还没认识任何人：打开一个聊天，边上出现小气泡后就开始记了。", "Nobody yet: open a chat, and once the bubble shows, people are remembered.")))
+            return@apply
         }
-        val alias = EditText(this).apply {
-            setText(r.alias)
+        val list = column().apply { setPadding(0, dp(6), 0, 0) }
+        if (all.size > 6) addView(EditText(this@MainActivity).apply {
+            hint = L.t("搜索名字、应用或关系", "Search name, app or relationship")
             isSingleLine = true
-            hint = if (Person.isFingerprint(r.name)) L.t("输入或粘贴 Ta 的名字，emoji 也行", "Type or paste their name, emoji and all")
-                else L.t("聊天标题上的名字：", "Name in the chat title: ") + r.name
+            setText(query)
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                override fun afterTextChanged(s: Editable?) { fillPeople(list, all, s?.toString().orEmpty()) }
+            })
+        })
+        addView(list)
+        fillPeople(list, all, query)
+    }
+
+    private fun fillPeople(list: LinearLayout, all: List<PersonStore.Entry>, query: String) {
+        list.removeAllViews()
+        val q = query.trim()
+        val shown = if (q.isEmpty()) all else all.filter { e ->
+            e.name.contains(q, ignoreCase = true) || e.kind?.contains(q, ignoreCase = true) == true ||
+                e.apps.any { Apps.label(it).contains(q, ignoreCase = true) }
         }
-        box.addView(alias)
-        if (Person.isFingerprint(r.name) && r.alias.isBlank())
-            box.addView(hint(L.t("Ta 给你发消息、通知里带着名字时，会自动认出这个名字。", "Their name is picked up by itself from their next message notification.")))
-        box.addView(text(people.describe(id), 13f, sub()).apply { setTextIsSelectable(true); setPadding(0, dp(8), 0, 0) })
-        box.addView(text(L.t("Ta 是你的…", "They are your…"), 13f, fg()).apply { setPadding(0, dp(12), 0, 0) })
-        lateinit var relPill: TextView
-        lateinit var closePill: TextView
-        val showRel = { relPill.text = relationChoice(people.relationOf(id)) + "  ▾" }
-        val showClose = { closePill.text = L.t("亲近：", "Closeness: ") + closenessChoice(people.closenessOf(id)) + "  ▾" }
-        relPill = pill("", false) { pickRelation(id, showRel) }
-        closePill = pill("", false) { pickCloseness(id, showClose) }
-        showRel()
-        showClose()
-        box.addView(wrapRow(listOf(relPill, closePill)))
-        box.addView(hint(L.t("关系和亲近程度是两回事：关系好不等于是恋人。选定后每条消息都按这个判断，学习此人也不会改掉。「自动判断」：学习此人时从档案里读出来，没学过就每条看对话判断。",
-            "What they are to you and how close you are are separate: close is not a couple. Once chosen, every message is judged that way and learning won't change it. \"Work it out\": taken from the profile when you learn this person, otherwise judged from each chat.")))
-        box.addView(text(L.t("专属背景（发给模型，优先于通用背景）", "Context for this person (sent to the model instead of the general one)"), 13f, fg()).apply { setPadding(0, dp(12), 0, 0) })
-        val note = EditText(this).apply { setText(r.note); minLines = 2; hint = L.t("例：大学室友，说话很直", "e.g. college roommate, very blunt") }
-        box.addView(note)
-        val dialog = AlertDialog.Builder(this)
-            .setTitle(SpannableStringBuilder(nameLabel(id, 20f)).append("（${r.apps.joinToString(" · ") { Apps.label(it) }}）"))
-            .setView(ScrollView(this).apply { addView(box) })
-            .setPositiveButton(L.t("保存", "Save")) { _, _ ->
+        for (e in shown) list.addView(personCard(e))
+        if (shown.isEmpty()) list.addView(hint(L.t("没有找到", "No one matches")))
+    }
+
+    /** One person in the list: who, where, what they are to you, how much was learned, one line about them. */
+    private fun personCard(e: PersonStore.Entry): View = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(16), dp(12), dp(16), dp(12))
+        background = rounded(tileBg(), dp(14))
+        layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(8) }
+        addView(text("", 16f, fg(), bold = true).apply { text = nameLabel(e.id, 16f) })
+        val facts = listOfNotNull(
+            e.apps.joinToString("+") { Apps.label(it) },
+            e.kind,
+            if (e.learned > 0) L.t("学习了 ${e.learned} 条", "${e.learned} learned") else L.t("还没学习", "not learned"),
+            L.t("已暂停", "paused").takeIf { e.muted },
+        )
+        addView(text(facts.joinToString("  ·  "), 13f, if (e.muted) warn() else sub()).apply { setPadding(0, dp(2), 0, 0) })
+        e.line?.let { addView(text(it, 14f, fg()).apply { maxLines = 2; setPadding(0, dp(4), 0, 0) }) }
+        isClickable = true
+        setOnClickListener { showPerson(e.id) }
+    }
+
+    /**
+     * Everything known about one person, on a page of its own: who they are to you, what the
+     * history read learned (section by section), what judging them has taught, and the settings
+     * that are theirs alone.
+     */
+    private fun buildPerson(id: String, focusName: Boolean): View = column().apply {
+        val r = people.loadId(id)
+        addView(LinearLayout(this@MainActivity).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(6), 0, 0)
+            addView(pill(L.t("← 所有人", "← Everyone"), false) { showPeople() })
+        })
+
+        // Who, where, and what they are to you.
+        addView(tile(null, people.shownName(id), r.apps.joinToString(" · ") { Apps.label(it) }) {
+            people.namePicture(id)?.let {
+                addView(text("", 14f, fg()).apply {
+                    text = SpannableStringBuilder(L.t("聊天标题上是：", "The chat title shows: ")).append(nameLabel(id, 20f))
+                })
+            }
+            if (r.muted) addView(text(L.t("已暂停：不解读，也不记录。", "Paused: not judged, nothing recorded."), 13f, warn()).apply { setPadding(0, dp(4), 0, 0) })
+            lateinit var relPill: TextView
+            lateinit var closePill: TextView
+            val showRel = { relPill.text = L.t("关系：", "Relationship: ") + relationChoice(people.relationOf(id)) + "  ▾" }
+            val showClose = { closePill.text = L.t("亲近：", "Closeness: ") + closenessChoice(people.closenessOf(id)) + "  ▾" }
+            relPill = pill("", false) { pickRelation(id, showRel) }
+            closePill = pill("", false) { pickCloseness(id, showClose) }
+            showRel()
+            showClose()
+            addView(wrapRow(listOf(relPill, closePill)).apply { setPadding(0, dp(8), 0, 0) })
+            addView(hint(L.t("关系和亲近程度是两回事：关系好不等于是恋人。选定后每条消息都按这个判断，学习也不会改掉；「自动判断」由学习从档案里读出来。",
+                "What they are to you and how close you are are separate: close is not a couple. Once chosen, every message is judged that way and learning won't change it; \"Work it out\" takes it from the profile.")))
+        })
+
+        // What the history read learned.
+        addView(tile(null, L.t("学到了什么", "What was learned"), learnedLine(r)) {
+            val secs = Profile.sections(r.bio)
+            if (secs.isEmpty()) addView(text(L.t("还没学习：在和 Ta 的聊天里打开卡片，点「学习」。应用会自己翻完你们的聊天记录，写一份档案。",
+                "Not learned yet: open the card in your chat with them and tap Learn. It reads your whole history and writes a profile."), 14f, fg()))
+            for (sec in secs) {
+                if (sec.heading.isNotEmpty()) addView(text(sec.heading, 14f, accent(), bold = true).apply { setPadding(0, dp(10), 0, dp(2)) })
+                for (l in sec.lines) addView(text(l, 14f, fg()).apply { setTextIsSelectable(true); setPadding(0, dp(1), 0, dp(1)) })
+            }
+        })
+
+        // What watching and judging them has taught.
+        val watched = listOfNotNull(
+            Relation.summary(r.stats)?.let { L.t("聊天：", "Chats: ") + it },
+            Person.styleSummary(r.style)?.let { L.t("你对 Ta：", "You to them: ") + it },
+            people.archiveCount(id).takeIf { it > 0 }?.let { L.t("手机上存着 $it 条聊天记录", "$it messages kept on this phone") },
+        )
+        val taught = Learner.plain(r.model)
+        val recent = Person.historySummary(r.history)
+        if (watched.isNotEmpty() || taught.isNotEmpty() || recent != null) addView(tile(null, L.t("边聊边学到的", "Learned while you chat"), L.t(
+            "不用点学习，聊天时自动记下的。判断的学习看的是给出建议后，下一轮气氛是缓和了还是更僵了。",
+            "Recorded as you chat, without Learn. Judging learns from whether things calmed down or got worse after the card's advice.")) {
+            for (l in watched) addView(text(l, 14f, fg()).apply { setPadding(0, dp(3), 0, dp(3)) })
+            for (l in taught) addView(text("• $l", 14f, fg()).apply { setPadding(0, dp(3), 0, dp(3)) })
+            recent?.let { addView(text(L.t("最近几轮：", "Last few turns: ") + it, 13f, sub()).apply { setPadding(0, dp(3), 0, 0) }) }
+        })
+
+        // Their name and context, edited here.
+        lateinit var alias: EditText
+        lateinit var note: EditText
+        addView(tile(null, L.t("名字和专属背景", "Name and context")) {
+            alias = field(if (Person.isFingerprint(r.name)) L.t("输入或粘贴 Ta 的名字，emoji 也行", "Type or paste their name, emoji and all")
+                else L.t("聊天标题上的名字：", "Name in the chat title: ") + r.name, r.alias)
+            if (Person.isFingerprint(r.name) && r.alias.isBlank())
+                addView(hint(L.t("Ta 给你发消息、通知里带着名字时，会自动认出这个名字。", "Their name is picked up by itself from their next message notification.")))
+            addView(text(L.t("专属背景（发给模型，优先于通用背景）", "Context for this person (sent to the model instead of the general one)"), 13f, sub()).apply { setPadding(0, dp(8), 0, 0) })
+            note = field(L.t("例：大学室友，说话很直", "e.g. college roommate, very blunt"), r.note, lines = 2)
+            addView(buttons(L.t("保存", "Save") to {
                 val fresh = people.loadId(id)
                 fresh.note = note.text.toString()
                 fresh.alias = alias.text.toString().trim().take(24)
                 people.save(fresh)
-                toast(L.t("已保存 ${people.shownName(id)}", "Saved ${people.shownName(id)}"))
-                refreshTools()
+                toast(L.t("已保存", "Saved"))
+                showPerson(id)
+            }))
+        })
+
+        // Everything else that is theirs alone.
+        val kept = people.archiveCount(id)
+        addView(tile(null, L.t("更多", "More")) {
+            val muted = people.isMuted(id)
+            val actions = mutableListOf<Pair<String, () -> Unit>>(
+                (if (muted) L.t("恢复解读", "Resume judging") else L.t("暂停这个人", "Pause this person")) to {
+                    people.setMuted(id, !muted)
+                    toast(if (muted) L.t("已恢复", "Resumed") else L.t("已暂停，不解读也不记录", "Paused: not judged, nothing recorded"))
+                    showPerson(id)
+                },
+                L.t("和别的应用上的 Ta 合并", "Merge with them on another app") to { merge(id) },
+            )
+            if (people.namePicture(id) != null) actions += L.t("名字图片不对，重新截", "Wrong name picture: take it again") to {
+                people.deleteNamePicture(id)
+                toast(L.t("下次打开和 Ta 的聊天时会重新截", "It is taken again next time you open the chat"))
+                showPerson(id)
             }
-            .setNeutralButton(L.t("更多…", "More…")) { _, _ -> personActions(id) }
-            .setNegativeButton(L.t("关闭", "Close"), null)
-            .show()
-        if (focusName) {
+            if (kept > 0) actions += L.t("删除聊天记录存档（$kept 条）", "Delete kept history ($kept)") to {
+                val name = people.shownName(id)
+                confirm(L.t("删除和「$name」的 $kept 条聊天记录存档？档案留着；下次学习会从头读。",
+                    "Delete the $kept kept messages with $name? The profile stays; the next Learn reads from the start."), L.t("删除", "Delete")) {
+                    people.deleteArchive(id); toast(L.t("已删除存档", "Kept history deleted")); showPerson(id)
+                }
+            }
+            actions += L.t("忘记这个人", "Forget this person") to {
+                val name = people.shownName(id)
+                confirm(L.t("忘记「$name」？学到的一切都会删除。", "Forget $name? Everything learned about them is deleted."), L.t("忘记", "Forget")) {
+                    people.forget(id); toast(L.t("已忘记", "Forgotten")); showPeople()
+                }
+            }
+            addView(wrapRow(actions.map { (label, go) -> pill(label, false) { go() } }))
+        })
+
+        if (focusName) post {
             alias.requestFocus()
-            dialog.window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
+            getSystemService(android.view.inputmethod.InputMethodManager::class.java)?.showSoftInput(alias, 0)
         }
+    }
+
+    /** "学习了 3617 条 · 9月27日 · 朋友 · 很铁（学习得出）", or what to do when nothing was learned. */
+    private fun learnedLine(r: PersonStore.Record): String? {
+        val bits = listOfNotNull(
+            r.learned.takeIf { it > 0 }?.let { L.t("读了 $it 条聊天记录", "$it messages read") },
+            r.learnedAt.takeIf { it > 0 }?.let { SimpleDateFormat(L.t("M月d日 HH:mm", "MMM d, HH:mm"), Locale.getDefault()).format(Date(it)) },
+            people.relationLine(r),
+        )
+        return bits.joinToString("  ·  ").ifBlank { null }
     }
 
     private fun closenessChoice(key: String): String =
@@ -649,37 +775,6 @@ class MainActivity : Activity() {
             .show()
     }
 
-    private fun personActions(id: String) {
-        val name = people.shownName(id)
-        val muted = people.isMuted(id)
-        val kept = people.archiveCount(id)
-        val items = arrayOf(
-            if (muted) L.t("恢复解读这个人", "Resume judging this person") else L.t("不再解读这个人", "Pause judging this person"),
-            L.t("和另一个人合并（跨应用同一人）", "Merge with another person (same person, other app)"),
-            L.t("忘记这个人", "Forget this person"),
-        ) + (if (kept > 0) arrayOf(L.t("删除聊天记录存档（$kept 条，档案保留）", "Delete the kept history ($kept messages; the profile stays)")) else emptyArray())
-        AlertDialog.Builder(this)
-            .setTitle(name)
-            .setItems(items) { _, which ->
-                when (which) {
-                    0 -> {
-                        people.setMuted(id, !muted)
-                        toast(if (muted) L.t("已恢复", "Resumed") else L.t("已暂停，不解读也不记录", "Paused: not judged, nothing recorded"))
-                    }
-                    1 -> merge(id)
-                    2 -> confirm(L.t("忘记「$name」？学到的一切都会删除。", "Forget $name? Everything learned about them is deleted."), L.t("忘记", "Forget")) {
-                        people.forget(id); refreshTools(); toast(L.t("已忘记", "Forgotten"))
-                    }
-                    3 -> confirm(L.t("删除和「$name」的 $kept 条聊天记录存档？档案留着；下次学习会从头读。",
-                        "Delete the $kept kept messages with $name? The profile stays; the next Learn reads from the start."), L.t("删除", "Delete")) {
-                        people.deleteArchive(id); toast(L.t("已删除存档", "Kept history deleted"))
-                    }
-                }
-            }
-            .setNegativeButton(L.t("取消", "Cancel"), null)
-            .show()
-    }
-
     /** One person on two apps: fold this record into another and keep the link. */
     private fun merge(from: String) {
         val others = people.entries().filter { it.id != from }
@@ -689,7 +784,7 @@ class MainActivity : Activity() {
             .setTitle(L.t("把「${people.nameOf(from)}」合并进谁？", "Merge ${people.nameOf(from)} into whom?"))
             .setItems(labels.toTypedArray()) { _, i ->
                 people.link(from, others[i].id)
-                refreshTools()
+                showPeople()
                 toast(L.t("已合并：以后两边都用「${others[i].name}」的记忆", "Merged: both apps now use ${others[i].name}'s memory"))
             }
             .setNegativeButton(L.t("取消", "Cancel"), null)
@@ -698,7 +793,7 @@ class MainActivity : Activity() {
 
     private fun cleanUp() {
         val n = people.cleanup()
-        refreshTools()
+        showPeople()
         toast(if (n == 0) L.t("没有可清理的", "Nothing to clean up") else L.t("清掉了 $n 条几乎没内容的记录", "Removed $n near-empty records"))
     }
 
@@ -793,8 +888,6 @@ class MainActivity : Activity() {
         prefs.apiKey = keyField.text.toString()
         prefs.orKey = orKeyField.text.toString()
         prefs.context = contextField.text.toString()
-        deepModelField?.let { prefs.deepModel = it.text.toString() }
-        visionModelField?.let { prefs.fastModel = it.text.toString() }
         savePackages()
     }
 
@@ -912,6 +1005,50 @@ class MainActivity : Activity() {
         setOnCheckedChangeListener { _, v -> onChange(v) }
     }
 
+    /**
+     * The models to choose from, each with what it is good at, the chosen one marked; and "Other…"
+     * for any OpenRouter id typed in by hand. A choice saves at once.
+     */
+    private fun modelChoices(options: List<Models.Option>, now: () -> String, choose: (String) -> Unit): View {
+        val box = column().apply { setPadding(0, 0, 0, 0) }
+        fun fill() {
+            box.removeAllViews()
+            val current = now()
+            for (o in options) box.addView(choiceRow(o.name, o.about, o.id == current) {
+                choose(o.id)
+                fill()
+                toast(L.t("已选 ", "Chosen: ") + o.name)
+            })
+            val custom = current.takeIf { Models.option(options, it) == null }
+            box.addView(choiceRow(L.t("其他模型…", "Other…"), custom ?: L.t("填任何 OpenRouter 模型名", "Type any OpenRouter model id"), custom != null) {
+                val field = EditText(this).apply { setText(custom.orEmpty()); hint = "vendor/model"; isSingleLine = true }
+                AlertDialog.Builder(this)
+                    .setTitle(L.t("OpenRouter 模型名", "OpenRouter model id"))
+                    .setView(LinearLayout(this).apply { setPadding(dp(20), dp(8), dp(20), 0); addView(field, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT)) })
+                    .setPositiveButton(L.t("用这个", "Use it")) { _, _ ->
+                        val id = field.text.toString().trim()
+                        if (id.isNotEmpty()) { choose(id); fill() }
+                    }
+                    .setNegativeButton(L.t("取消", "Cancel"), null)
+                    .show()
+            })
+        }
+        fill()
+        return box
+    }
+
+    /** One option: its name, what it is good at, and a mark when it is the one in use. */
+    private fun choiceRow(title: String, about: String, chosen: Boolean, onClick: () -> Unit): View = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(12), dp(8), dp(12), dp(8))
+        background = rounded(if (chosen) chipBg() else tileBg(), dp(10)).apply { setStroke(dp(1), if (chosen) accent() else chipBg()) }
+        layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(6) }
+        addView(text((if (chosen) "✓  " else "") + title, 15f, if (chosen) accent() else fg(), bold = true))
+        addView(text(about, 12f, sub()))
+        isClickable = true
+        setOnClickListener { onClick() }
+    }
+
     private fun buttons(vararg items: Pair<String, () -> Unit>): View =
         wrapRow(items.map { (label, action) -> pill(label, true) { action() } }).apply { setPadding(0, dp(6), 0, 0) }
 
@@ -996,7 +1133,11 @@ class MainActivity : Activity() {
         private const val REQ_IMPORT = 42
 
         /** Tools tab order. Each can be hidden and brought back. */
-        val TOOLS = listOf("pause", "people", "card", "usage", "backup", "models", "battery", "diagnostics", "guide")
+        val TOOLS = listOf("pause", "card", "usage", "backup", "battery", "diagnostics", "guide")
+
+        private const val TAB_SETUP = 0
+        private const val TAB_TOOLS = 1
+        private const val TAB_PEOPLE = 2
 
         fun guide(): String = L.t(
             "用法\n" +

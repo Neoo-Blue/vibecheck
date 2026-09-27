@@ -296,6 +296,15 @@ class StreamTest {
         assertFalse(OpenRouter.thinkingRequired(OpenRouter.Think.OFF, OpenRouter.Failure(401, "HTTP 401: reasoning")))
     }
 
+    @Test fun aModelThatReadsNoImagesGetsTheTextAlone() {
+        assertTrue(OpenRouter.noImages(OpenRouter.Failure(404, "HTTP 404: {\"error\":{\"message\":\"No endpoints found that support image input\"}}")))
+        assertFalse(OpenRouter.noImages(OpenRouter.Failure(404, "HTTP 404: model not found")))
+        assertFalse(OpenRouter.noImages(OpenRouter.Failure(401, "image")))
+        val p = OpenRouter.deepPrompt("小明", "", null, null, null, listOf("对方" to "在吗"), emptyMap(), true, true)
+        assertTrue(p.contains(OpenRouter.SCREENSHOT_NOTE))
+        assertFalse(p.replace(OpenRouter.SCREENSHOT_NOTE, "").contains("以截图为准"))
+    }
+
     @Test fun theFastestProviderUnlessTheSlugSaysOtherwise() {
         assertEquals("throughput", OpenRouter.providerSort("deepseek/deepseek-v4.1-flash"))
         assertEquals("throughput", OpenRouter.providerSort("~anthropic/claude-haiku-latest"))
@@ -310,6 +319,31 @@ class StreamTest {
         assertEquals("anthropic/claude-haiku-4.5", Prefs.fastOrDefault(" anthropic/claude-haiku-4.5 "))
     }
 
+    @Test fun defaultsStoredByOlderSettingsPagesMoveToTheNewDefault() {
+        val fast = setOf("deepseek/deepseek-v4-flash-vision-exp", "deepseek/deepseek-v4.1-flash")
+        assertTrue(Prefs.wasDefault(" deepseek/deepseek-v4.1-flash", fast))
+        assertFalse(Prefs.wasDefault("moonshotai/kimi-k3", fast))
+        // From now on the default is stored as nothing, and a real choice as itself.
+        assertEquals("", Prefs.stored(Prefs.DEFAULT_FAST, Prefs.DEFAULT_FAST))
+        assertEquals("", Prefs.stored("  ", Prefs.DEFAULT_FAST))
+        assertEquals("deepseek/deepseek-v4.1-flash", Prefs.stored("deepseek/deepseek-v4.1-flash ", Prefs.DEFAULT_FAST))
+        assertEquals(Prefs.DEFAULT_FAST, Prefs.fastOrDefault(Prefs.stored(Prefs.DEFAULT_FAST, Prefs.DEFAULT_FAST)))
+    }
+
+    @Test fun theModelOptionsAreWellFormedAndStartWithTheDefaults() {
+        val slug = Regex("""^[a-z0-9-]+/[a-z0-9.\-]+$""")
+        for (o in Models.REPLY + Models.DEEP) {
+            assertTrue(o.id, slug.matches(o.id))
+            assertTrue(o.name, o.about.isNotBlank())
+        }
+        assertEquals(Prefs.DEFAULT_FAST, Models.REPLY.first().id)
+        assertEquals(Prefs.DEFAULT_DEEP, Models.DEEP.first().id)
+        assertEquals("Kimi K3", Models.option(Models.REPLY, " moonshotai/kimi-k3 ")?.name)
+        assertNull("typed in by hand", Models.option(Models.REPLY, "anthropic/claude-opus-5"))
+        // What cannot do adult replies says so.
+        assertTrue(Models.option(Models.REPLY, "qwen/qwen3.8-max-0902")!!.about.contains("不写成人回复"))
+    }
+
     @Test fun adultDraftsOnlyWhenSwitchedOnAndOnlyAtTheirLevel() {
         assertFalse(OpenRouter.replySystem(false).contains("性话题"))
         val on = OpenRouter.replySystem(true)
@@ -321,5 +355,90 @@ class StreamTest {
         val en = OpenRouter.replySystem(true)
         assertTrue(en.contains("under 18") && en.contains("never further than they have shown they want"))
         assertFalse(OpenRouter.replySystem(false).contains("under 18"))
+    }
+}
+
+/**
+ * The bug report with 🍵 in the title: a notification sliding over the title bar was cut out
+ * and kept as the picture of the person's name ("…improvements and QoL feat… vibecheck · Default").
+ */
+class NamePictureTest {
+
+    private val win = Chat.Box(0, 0, 923, 2000)
+
+    @Test fun aNotificationOverTheTitleBarCoversIt() {
+        val statusBar = Chat.Box(0, 0, 923, 95)
+        assertFalse("the status bar alone ends above the name", Person.titleCovered(listOf(statusBar), win))
+        val withNotification = Chat.Box(0, 0, 923, 330)
+        assertTrue(Person.titleCovered(listOf(statusBar, withNotification), win))
+        val navBar = Chat.Box(0, 1950, 923, 2000)
+        assertFalse(Person.titleCovered(listOf(navBar), win))
+    }
+
+    @Test fun ourOwnCardOverTheTitleBarCoversIt() {
+        assertTrue(Person.titleCovered(listOf(Chat.Box(46, 110, 877, 1700)), win))
+        assertFalse("a card lower down leaves the name alone", Person.titleCovered(listOf(Chat.Box(240, 770, 900, 1730)), win))
+        assertFalse("the bubble at the edge is beside the name, not over it", Person.titleCovered(listOf(Chat.Box(870, 100, 915, 190)), win))
+    }
+
+    private fun picture(w: Int, h: Int, ink: (Int, Int) -> Boolean) =
+        IntArray(w * h) { i -> if (ink(i % w, i / w)) 0xFF202020.toInt() else 0xFFF5F5F5.toInt() }
+
+    @Test fun signaturesTellNamesApart() {
+        val cup = picture(60, 40) { x, y -> (x - 30) * (x - 30) + (y - 20) * (y - 20) < 150 }
+        val cupAgain = picture(62, 40) { x, y -> (x - 31) * (x - 31) + (y - 20) * (y - 20) < 150 }
+        val banner = picture(400, 40) { x, y -> y in 8..14 && x % 9 < 6 || y in 26..31 && x < 180 && x % 7 < 5 }
+        val a = Person.signature(cup, 60, 40)
+        assertTrue("the same emoji a pixel wider", Person.samePicture(a, Person.signature(cupAgain, 62, 40)))
+        assertFalse(Person.samePicture(a, Person.signature(banner, 400, 40)))
+    }
+
+    @Test fun aPictureIsKeptOnlyOnceSeenAlike() {
+        val cup = IntArray(36) { if (it % 12 in 5..6) 40 else 240 }
+        val banner = IntArray(36) { if (it / 12 == 0) 90 else 200 }
+        val votes = Person.PictureVotes()
+        assertFalse("one look is not enough", Person.keepPicture(null, cup, votes))
+        assertTrue(Person.keepPicture(null, cup, votes))
+        // A wrong picture already kept is replaced after three agreeing looks, not before.
+        val fresh = Person.PictureVotes()
+        assertFalse(Person.keepPicture(banner, cup, fresh))
+        assertFalse(Person.keepPicture(banner, cup, fresh))
+        assertTrue(Person.keepPicture(banner, cup, fresh))
+        // Looks that keep changing replace nothing; a look that matches what is kept resets the count.
+        val flicker = Person.PictureVotes()
+        repeat(4) { assertFalse(Person.keepPicture(cup, if (it % 2 == 0) banner else IntArray(36) { 128 }, flicker)) }
+        assertFalse(Person.keepPicture(cup, banner, flicker))
+        assertFalse(Person.keepPicture(cup, cup, flicker))
+        assertFalse(Person.keepPicture(cup, banner, flicker))
+    }
+}
+
+/** What the People tab shows about a person. */
+class PeoplePageTest {
+
+    @After fun chinese() { L.en = false }
+
+    @Test fun oneLineAboutThemComesFromHowYouGetAlong() {
+        val profile = "【Ta 是谁】\n• 在上海做设计\n【我们怎么相处】\n• 我们互怼很凶，但有事第一个找对方\n【Ta 喜欢】\n• 猫"
+        assertEquals("我们互怼很凶，但有事第一个找对方", Profile.oneLine(profile))
+        assertEquals("在上海做设计", Profile.oneLine("【Ta 是谁】\n• 在上海做设计"))
+        assertEquals("对方是我的好友或死党，关系亲密，…", Profile.oneLine("• 对方是我的好友或死党，关系亲密，彼此可以随意开玩笑、互怼。", max = 17))
+        assertNull(Profile.oneLine(""))
+    }
+
+    @Test fun whatJudgingTaughtIsSaidInWords() {
+        val m = Learner.Model(dangerBias = 0.12, updates = 9)
+        m.arms["*|在表达不满|先道歉"] = Learner.Arm(4, 0.5)
+        m.arms["*|在开玩笑或一起感慨|接梗顺着聊"] = Learner.Arm(3, -0.3)
+        m.arms["*|*|先道歉"] = Learner.Arm(9, 0.4)            // every intent at once: not said
+        m.arms["*|单纯想知道答案|正面回答问题"] = Learner.Arm(2, 0.9)  // too few to say
+        val lines = Learner.plain(m)
+        assertTrue(lines[0], lines[0].contains("更容易出问题"))
+        assertTrue(lines.any { it.contains("在表达不满") && it.contains("先道歉") && it.contains("缓和") && it.contains("4 次") })
+        assertTrue(lines.any { it.contains("接梗顺着聊") && it.contains("更僵") })
+        assertEquals(3, lines.size)
+        assertTrue(Learner.plain(Learner.Model()).isEmpty())
+        L.en = true
+        assertTrue(Learner.plain(Learner.Model(dangerBias = -0.2)).single().startsWith("They are easier going"))
     }
 }

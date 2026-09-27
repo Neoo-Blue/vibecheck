@@ -431,6 +431,10 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                 return@captureChat
             }
             val win = shot.box
+            // Looked at as the picture is taken: a notification sliding over the title bar, or our
+            // own card sitting there, was once cut out and kept as "their name". A capture of the
+            // chat's own window has neither in it.
+            val over = if (shot.windowOnly) emptyList() else overlays()
             Ocr.read(shot.bmp) { items ->   // main thread
                 ocrDone()
                 // Recognized in bitmap pixels; everything else works in screen coordinates.
@@ -444,10 +448,11 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                 val ime = imeBox()
                 val exclude = if (shot.windowOnly) emptyList() else listOfNotNull(card.bounds(), ime)
                 val (found, titles) = Chat.fromOcr(placed, win, exclude, Chat.replyRowAbove(ime, win))
-                val avatar = avatarPrint(shot.bmp, win, found)?.let { Person.hashOf(it) }.orEmpty()
-                val title = Person.hashOf(titlePrint(shot.bmp))
+                val covered = Person.titleCovered(over + exclude, win)
+                val avatar = avatarPrint(shot.bmp, win, found, over + exclude)?.let { Person.hashOf(it) }.orEmpty()
+                val title = if (covered) "" else Person.hashOf(titlePrint(shot.bmp))
                 // No name to read in the title bar: keep a picture of it (the emoji the name is made of).
-                val picture = if (titles.none { Person.looksLikeName(it.first) } && !Person.isTyping(titles)) namePicture(shot.bmp) else null
+                val picture = if (!covered && titles.none { Person.looksLikeName(it.first) } && !Person.isTyping(titles)) namePicture(shot.bmp) else null
                 shot.bmp.recycle()
                 if (gen != screenGen) { rescanSoon(); return@read }   // the screen changed under the capture
                 onHomeScreen = Chat.looksLikeHomeScreen(placed, win)
@@ -562,8 +567,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         val record = people.load(targetPkg, name)
         val id = record.id
         // Someone known only by a fingerprint: the picture of their name is how they are shown.
-        if (Person.isFingerprint(record.name) && record.alias.isBlank() && !people.hasNamePicture(id))
-            lastNamePicture?.let { people.saveNamePicture(id, it) }
+        if (Person.isFingerprint(record.name) && record.alias.isBlank()) lastNamePicture?.let { considerNamePicture(id, it) }
         nameFromNotifications(record, bubbles)
         val entering = activeId != id
         activeId = id
@@ -1162,9 +1166,13 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                 }
                 val started = System.currentTimeMillis()
                 // Each finished line goes on the card while the model writes the next.
-                val r = runCatching {
-                    OpenRouter.chat(prefs.orKey, model, system, prompt, image, think = think,
-                        onLine = { text -> main.post { deepPartial(kind, tag, v, title, text) } })
+                val ask = { pic: String?, text: String ->
+                    OpenRouter.chat(prefs.orKey, model, system, text, pic, think = think,
+                        onLine = { line -> main.post { deepPartial(kind, tag, v, title, line) } })
+                }
+                // A model that reads no images (one typed in, or Qwen) gets the text alone.
+                val r = runCatching { ask(image, prompt) }.recoverCatching { e ->
+                    if (image != null && OpenRouter.noImages(e)) ask(null, prompt.replace(OpenRouter.SCREENSHOT_NOTE, "")) else throw e
                 }
                 r.onSuccess { Diag.log("deep($model) ok in ${System.currentTimeMillis() - started}ms") }
                     .onFailure { Diag.lastError = "deep: ${it.message}"; Diag.log(Diag.lastError) }
@@ -1537,6 +1545,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         val overruled = p.rel?.takeIf { rec.relByHand && it != Relationship.pinned(rec.rel) }
         if (!rec.relByHand && p.rel != null) rec.rel = p.rel
         if (!rec.closeByHand && p.close != null) rec.close = p.close
+        rec.learnedAt = System.currentTimeMillis()
         people.save(rec)
         Diag.log("learn: profile written for ${rec.name} (${p.rel}, ${p.close})")
         learnResult(id, L.t("已学会 ${displayName(rec)}（$total 条）", "Learned ${displayName(rec)} ($total messages)"),
@@ -1729,12 +1738,49 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         else Bitmap.createScaledBitmap(cut, cut.width * 64 / cut.height, 64, true).also { if (it !== cut) cut.recycle() }
     }.getOrNull()
 
-    /** Their avatar, from the row of the first message they sent: a photo, so it has real variation. */
-    private fun avatarPrint(bmp: Bitmap, win: Chat.Box, bubbles: List<Chat.Bubble>): IntArray? {
-        val first = bubbles.firstOrNull { it.incoming } ?: return null
+    /**
+     * Their avatar, from the row of the first message they sent that nothing is drawn over (a
+     * notification, our card, the keyboard): a photo, so it has real variation.
+     */
+    private fun avatarPrint(bmp: Bitmap, win: Chat.Box, bubbles: List<Chat.Bubble>, over: List<Chat.Box>): IntArray? {
         val w = bmp.width
-        val top = first.box.top - win.top   // screen to bitmap coordinates
-        return blockMeans(bmp, Chat.Box((w * 0.015f).toInt(), top, (w * 0.09f).toInt(), (top + bmp.height * 0.032f).toInt()))
+        val region = bubbles.filter { it.incoming }.map { b ->
+            Chat.Box(win.left + (w * 0.015f).toInt(), b.box.top, win.left + (w * 0.09f).toInt(), (b.box.top + bmp.height * 0.032f).toInt())
+        }.firstOrNull { r -> over.none { Chat.overlaps(it, r) } } ?: return null
+        // Screen to bitmap coordinates.
+        return blockMeans(bmp, Chat.Box(region.left - win.left, region.top - win.top, region.right - win.left, region.bottom - win.top))
+    }
+
+    /**
+     * What other windows draw over a capture of the whole display: system windows short of the
+     * full screen (the status bar, which grows over the title bar while a notification slides
+     * down; the navigation bar). A pulled-down shade is not a chat anyway.
+     */
+    private fun overlays(): List<Chat.Box> = runCatching {
+        val screen = resources.displayMetrics.heightPixels
+        windows.filter { it.type == AccessibilityWindowInfo.TYPE_SYSTEM }.map { w ->
+            val r = Rect().also { w.getBoundsInScreen(it) }
+            Chat.Box(r.left, r.top, r.right, r.bottom)
+        }.filter { it.bottom - it.top < screen * 0.9f }
+    }.getOrDefault(emptyList())
+
+    /** Name pictures seen lately that differ from the kept one, per person. */
+    private val pictureVotes = HashMap<String, Person.PictureVotes>()
+
+    /** A picture of an unreadable name is kept, or replaces the kept one, only once seen alike more than once. */
+    private fun considerNamePicture(id: String, pic: Bitmap) {
+        val seen = pictureSignature(pic)
+        val kept = people.namePicture(id)?.let { pictureSignature(it) }
+        if (!Person.keepPicture(kept, seen, pictureVotes.getOrPut(id) { Person.PictureVotes() })) return
+        people.saveNamePicture(id, pic)
+        Diag.log(if (kept == null) "name picture kept" else "name picture replaced")
+        if (cardFor == id) cardShows = null   // the title is drawn again with it
+    }
+
+    private fun pictureSignature(bmp: Bitmap): IntArray {
+        val px = IntArray(bmp.width * bmp.height)
+        bmp.getPixels(px, 0, bmp.width, 0, 0, bmp.width, bmp.height)
+        return Person.signature(px, bmp.width, bmp.height)
     }
 
     /** The middle of the title bar, where the name (or the emoji that is the name) is drawn. */

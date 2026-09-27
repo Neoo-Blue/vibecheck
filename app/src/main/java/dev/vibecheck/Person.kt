@@ -193,6 +193,60 @@ object Person {
         return intArrayOf(left, rows.first, right, rows.last)
     }
 
+    // ---- keeping the right picture of a name ----
+
+    /**
+     * The name band of the title bar (where [nameBox] looks, 4.5% to 10.5% down the window) has
+     * something drawn across its middle: a notification, our card. Its picture and fingerprint
+     * would be of that, not of the name.
+     */
+    fun titleCovered(over: List<Chat.Box>, win: Chat.Box): Boolean {
+        val h = win.bottom - win.top
+        val mid = win.top + (h * 0.075f).toInt()
+        val band = Chat.Box(win.left + (win.width * 0.18f).toInt(), win.top + (h * 0.045f).toInt(), win.left + (win.width * 0.82f).toInt(), win.top + (h * 0.105f).toInt())
+        return over.any { it.top <= mid && it.bottom > mid && Chat.overlaps(it, band) }
+    }
+
+    /** Brightness block means of a picture, [cols] x [rows]: enough to tell one name from another. */
+    fun signature(px: IntArray, w: Int, h: Int, cols: Int = 12, rows: Int = 3): IntArray {
+        val sum = LongArray(cols * rows)
+        val n = IntArray(cols * rows)
+        if (w <= 0 || h <= 0 || px.size < w * h) return IntArray(cols * rows)
+        for (y in 0 until h) for (x in 0 until w) {
+            val p = px[y * w + x]
+            val i = (y * rows / h) * cols + (x * cols / w)
+            sum[i] += (((p shr 16) and 0xFF) * 30 + ((p shr 8) and 0xFF) * 59 + (p and 0xFF) * 11) / 100
+            n[i]++
+        }
+        return IntArray(cols * rows) { if (n[it] == 0) 0 else (sum[it] / n[it]).toInt() }
+    }
+
+    /** Two pictures of a name look alike: signatures (block means, 0..255) within a small average difference. */
+    fun samePicture(a: IntArray, b: IntArray): Boolean =
+        a.size == b.size && a.isNotEmpty() && a.indices.sumOf { kotlin.math.abs(a[it] - b[it]) } / a.size <= 14
+
+    /** Pictures of one person's name seen lately that did not match the kept one. */
+    class PictureVotes {
+        var seen: IntArray? = null
+        var count = 0
+    }
+
+    /**
+     * Whether to keep a newly seen picture of someone's name. Once a notification sliding over the
+     * title bar was cut out as the name and kept for good. Now a first picture waits for a second
+     * look that agrees, and a kept one is replaced once three looks in a row agree with each other
+     * and not with it.
+     */
+    fun keepPicture(kept: IntArray?, seen: IntArray, votes: PictureVotes): Boolean {
+        if (kept != null && samePicture(kept, seen)) { votes.seen = null; votes.count = 0; return false }
+        val before = votes.seen
+        if (before != null && samePicture(before, seen)) votes.count++ else { votes.seen = seen; votes.count = 1 }
+        if (votes.count < (if (kept == null) 2 else 3)) return false
+        votes.seen = null
+        votes.count = 0
+        return true
+    }
+
     /** Code points that only ever travel inside an emoji: ZWJ, variation selectors, keycap, skin tones, tags. */
     private fun isEmojiPart(cp: Int): Boolean =
         cp == 0x200D || cp in 0xFE00..0xFE0F || cp == 0x20E3 || cp in 0x1F3FB..0x1F3FF || cp in 0xE0020..0xE007F
