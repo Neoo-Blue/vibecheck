@@ -21,7 +21,7 @@ Every new message from the other side gets a quick **triage**:
 
 | id | type | question |
 |---|---|---|
-| `situation` | choice | what kind of chat: romance / flirting / friend / family / colleague / client / stranger / customer service |
+| `situation` | choice | who they are to you: partner / flirting / friend / family / colleague / client / stranger / customer service. Asked only while that is unknown (see "Who they are to you") |
 | `intent` | choice | what they actually mean |
 | `danger` | score | how badly this turn can go, x / 6 |
 | `urgency` | noul | does this need an answer now |
@@ -35,7 +35,7 @@ the situation**, so a work chat and a first chat with a stranger show different 
 | colleague / client / customer service | what they are asking for, time pressure, does going along commit me to something, best move |
 | stranger | their interest, should I push, where to take the topic, best move |
 | friend / family | their mood, what they need right now, best move |
-| romance / flirting | are they being literal, what they need right now, best move |
+| partner / flirting | are they being literal, what they need right now, best move |
 
 Jev only returns judgments with probabilities; it never writes lines for you. The "suggested
 move" at the bottom of the card is computed in code from `danger`.
@@ -72,7 +72,7 @@ The app has two tabs, and everything saves as you go:
 
 - **Setup** holds only what it takes to get going: the checklist, the judging engine and keys,
   which apps to watch, a few behaviour switches (judging on, automatic deep reads, OCR, learning,
-  remembering people) and the general relationship context.
+  remembering people) and a general context for people you have not described.
 - **Tools** holds everything else, one simple tile each: **Pause** (1 hour, or until 8 am),
   **People** (see and edit what was learned per person, pause a person, merge, forget, clean up
   near-empty records), **Card** (text size, which buttons the card shows, buzz on high risk,
@@ -115,7 +115,7 @@ not whether you followed it. The bandit is stored in SharedPreferences and can b
 Each settlement updates three keys and lookup falls back from the most specific:
 
 ```
-romance|expressing displeasure|apologize first   ← used once it has 3+ samples
+partner|expressing displeasure|apologize first   ← used once it has 3+ samples
 *|expressing displeasure|apologize first         ← new situation: fall back to "this intent"
 *|*|apologize first                              ← new intent: "how does this action do in general"
 ```
@@ -140,8 +140,8 @@ Score answers carry their meaning ("3 / 4 · today", "5 / 6 · risky"), not just
 | More / Less | expand shows "what kind of chat" and "answer now?" and lays out the deep analysis in full |
 | Think | one deep pass through DeepSeek on OpenRouter: what they care about, the trap in this step, a concrete next move |
 | Reply | three reply drafts in **your own way of speaking**; tap one to put it into the (empty) reply box, long-press to copy. Nothing is ever sent for you |
-| Learn | read this person's whole history and write a profile (see "Learn this person") |
-| ⋯ | re-check this screen, pause 1 hour, pause this chat, settings |
+| Learn | read and keep your whole history with this person and write a detailed profile (see "Learn this person") |
+| ⋯ | re-check this screen, who they are to you and how close, rename, pause 1 hour, pause this chat, settings |
 | ✕ | back to the bubble |
 
 Think, Reply, Learn and ⋯ can each be switched off under Tools → Card. The deep read and the
@@ -194,16 +194,32 @@ Switch this off under Setup → "Remember people while you chat"; a paused chat 
 ## Per-person memory (all on the phone)
 
 The app reads the contact's name from the chat title bar (falling back to the avatar's
-content description on WeChat, or to a fingerprint of the title bar when the name is pure emoji)
-and stores everything under "app package + name":
+content description on WeChat) and stores everything under "app package + name". Emoji in names
+are fine where the app gives text. OCR (WeChat, Telegram) cannot see emoji at all:
+- A chat whose name is only emoji is known by the avatar beside their messages, and the title
+  bar is remembered against it for screens where only your own messages show.
+- Such a person is shown with the emoji itself: a small picture of the name cut from the chat's
+  title bar, on the card and in Tools → People, never an internal code.
+- Their real name, emoji and all, is picked up from their message notifications: once a
+  notification's message is on screen in that chat, its sender's name becomes theirs. The same
+  puts the emoji back on names OCR read only in part ("欧欧" becomes "欧欧🌸").
+- ⋯ → Rename on the card names anyone by hand (type or paste emoji); your name always wins.
+- A "typing…" indicator in place of the name is not taken for one.
+- Labels apps put on anyone ("Souler" on every Soul avatar, 对方, 用户) are never a name; a name made
+  only of marks ("...", "。") counts where the app gives text. Debug mode lists the title bar's
+  texts and avatar labels, which shows why a name was or was not read.
 
 | stored | from | used as |
 |---|---|---|
-| personal note | typed by you in settings | overrides the generic "relationship context" |
+| who they are to you | learned from the history, or chosen on the card (⋯ → Relationship) or under Tools → People | `我和对方的关系` in the state; the situation question is then not asked |
+| how close you are | the same, as its own choice: distant, casual, familiar, close, very close | `我们有多亲近` in the state, and on the card title |
+| a name you gave them | ⋯ → Rename, or Tools → People | shown everywhere, and the name the models are given |
+| personal note | typed by you in settings | `relationship context`, together with the profile; both replace the general context |
 | how I talk to them | statistics over my own messages | `my usual way of speaking` in the state |
 | last 8 turns | one `intent / danger / action` line per judgment | `where the last few turns went` in the state |
 | this person's bandit | see Learning | calibrates danger, re-ranks the best move |
-| profile | 4 to 6 lines written by DeepSeek after "learn this person" | `relationship context` when no note is set |
+| kept history | the whole chat, from "learn this person", topped up live with new messages | what the profile is written from; reply drafts pick real past exchanges from it |
+| profile | sections written by DeepSeek from the whole kept history | the full text for deep reads and drafts; a short brief as `relationship context`; one matching line on the card |
 
 The same sentence means different things from different people, so nothing is shared between
 two people: "apologize first" working on A does not touch B's ranking. Tools → People shows what
@@ -212,19 +228,62 @@ them with the same person on another app, or forget them. Tools → Backup expor
 file for a new phone.
 
 Statistics stay local, but their summary (e.g. "avg 12 chars, apologises 8%") goes with each
-judgment request. Nothing is uploaded beyond the dozen messages currently on screen, and no
-transcript is kept.
+judgment request. For people you have not learned, nothing is uploaded beyond the dozen messages
+currently on screen and no transcript is kept. For people you learn, see below.
 
 ### Learn this person
 
 Open the card in a chat and tap Learn. The card drops to the bubble, which shows the running
-count, and the app pages up through the history by itself. Each page's new lines are joined
-onto the front, aligned by the overlap between pages rather than by de-duplicating text, so
-"ok" sent thirty times stays thirty messages. It stops after four pages without new content or
-at 60 pages; tap the bubble to stop early and keep what was read. The full read then replaces
-message counts and speaking style, and DeepSeek writes the profile. Switching app or page, or an
-interrupted service, cancels the read; a read that covers fewer messages than the live count does
-not overwrite the statistics.
+count, and the app pages up through **the whole history** by itself, about a page a second (a
+little slower where it has to use OCR). Each page's new lines are joined onto the front, aligned
+by the overlap between pages rather than by de-duplicating text, so "ok" sent thirty times stays
+thirty messages. It stops at the first message (five pages in a row with nothing new); tap the
+bubble to stop early and keep what was read. Keep the screen on and the chat open while it runs.
+
+What was read is kept on the phone (app-private storage, one file per chat) and topped up with
+new messages as you chat. The next Learn only reads back until it meets what is kept, so it
+takes seconds. Tools → People → More… deletes a kept history; forgetting a person deletes it too.
+
+Then the profile. A long history is sent to your OpenRouter model in stretches of about 12,000
+characters, three at a time: notes on each stretch, then one profile from all the notes. Notes
+are cached by the stretch's content, so a later Learn pays only for what is new. The card shows
+how far it has got. The profile starts with what they are to you and how close you are, then
+sections: who they are, how you get along, how they talk, how you talk to them (both with
+quotes), likes, dislikes, what you talk about, running jokes, things that happened, sore spots,
+and what helps when they are down. The message counts and speaking style are recomputed from
+the whole history, and the card on screen is judged again, on the same messages, with what was
+learned.
+
+Where it goes: the judge gets a short brief (how you get along, how they talk, sore spots, what
+helps); deep reads and reply drafts get the whole profile; reply drafts also get up to eight
+real exchanges from the history (the ones most like what they just said, and the latest) and
+the things you say most often, so they sound like you and not like a template. The card adds
+one line from the profile when it fits: what helps when they are down, their sore spots when it
+could go wrong, your running jokes when they are joking.
+
+The read leaves the chat scrolled far up; those old screens are not judged, and judging picks up
+again once the newest messages are back on screen. Switching app or page, or an interrupted
+service, cancels the read.
+
+### Who they are to you
+
+Two separate things: what they are to you, and how close you are. Being close is not being a
+couple, and the old option "恋爱或亲密关系" treated it as if it were.
+
+Each person can carry a relationship: partner, flirting, friend, family, colleague, client,
+stranger or customer service, the same options as the `situation` question, and a closeness:
+distant, casual, familiar, close or very close. Once the relationship is known,
+Jev is told instead of asked, so every message is judged as what it is and the card can no
+longer call a best friend a partner because the two of you were talking about their boyfriend.
+Without one, the question asks about the two of you rather than the topic, and nothing is
+assumed.
+
+Both are filled in by "learn this person" (the profile's first two lines), and can be chosen by
+hand on the card (⋯ → Relationship) or under Tools → People; your choice wins over a later read,
+and "Work it out" / "Not sure" hands it back to the reads. Profiles written before 6.7.0 are read
+for both from their first line when that line is unambiguous ("好友或死党，关系亲密" is a friend,
+close). When the relationship, the closeness, a name, a profile or a note changes, the card for
+that chat is judged again, and the result of the read stays under the new card.
 
 ### One person across apps
 
@@ -279,15 +338,25 @@ with what is actually on screen.
   new will leak into the context.
 - No view ids are used anywhere (WeChat renames them every release): only TextView + text +
   screen position + long-clickability.
-- Only **messages visible on screen**, at most the last 12; no database, no history, except
-  during an explicit "learn this person" read.
+- Judging sees only **messages visible on screen**, at most the last 12. A whole history is
+  read and kept only for people you learn.
+- Learning reads what the chat shows as text: pictures, stickers, voice messages and files are
+  not in it, and a long run of them can look like the top of the history and end the read early
+  (tap Learn again; it continues). WeChat's own search and dates are not used, so the kept history
+  has no timestamps.
 - Chinese ROMs (MIUI / ColorOS / HarmonyOS) kill background accessibility services; exclude the
   app from battery optimisation (Tools → Keep it running).
 
 ## Privacy
 
+Notifications from the watched apps are read only for the sender's name and message, kept in
+memory (the last 40) to name emoji-only contacts, and never stored or sent anywhere.
+
 Chat text goes to `api.typesafe.ai` for judging (or to `openrouter.ai` if you chose that
-engine) and, when you press the buttons, to `openrouter.ai`. API keys and learning state live in the app's private SharedPreferences.
+engine) and, when you press the buttons, to `openrouter.ai`. **Learning a person sends their
+whole history to your OpenRouter model** to write the profile, and reply drafts send a few past
+exchanges with them. API keys and learning state live in the app's private SharedPreferences;
+kept histories are files in app-private storage, not included in Backup exports.
 The debug endpoint is LAN-only and token-gated but can read chat content: do not enable it on
 public Wi-Fi. This is a personal tool for your own phone and your own conversations.
 

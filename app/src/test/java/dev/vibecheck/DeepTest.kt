@@ -9,7 +9,7 @@ class DeepTest {
         "literal" to Jev.Answer.Noul(0.18),
         "intent" to Jev.Answer.Dist("想要你主动承担", mapOf("想要你主动承担" to 0.68, "在表达不满" to 0.32)),
         "danger" to Jev.Answer.Scored(3.2, 6),
-        "situation" to Jev.Answer.Dist("暧昧试探", mapOf("暧昧试探" to 0.8, "恋爱或亲密关系" to 0.2)),
+        "situation" to Jev.Answer.Dist("暧昧试探", mapOf("暧昧试探" to 0.8, "恋人或伴侣" to 0.2)),
         "urgency" to Jev.Answer.Noul(0.82),
     )
     private val transcript = listOf("我" to "我喜欢欲擒故纵", "对方" to "让我主动")

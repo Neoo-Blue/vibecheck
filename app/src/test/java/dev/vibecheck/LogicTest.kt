@@ -204,19 +204,19 @@ class LearnerTest {
 
     @Test fun learningIsScopedToTheIntent() {
         val m = Learner.Model()
-        repeat(5) { Learner.observe(m, Learner.Episode("恋爱或亲密关系", "在表达不满", "先回应情绪", 0.9), 0.1) }
+        repeat(5) { Learner.observe(m, Learner.Episode("恋人或伴侣", "在表达不满", "先回应情绪", 0.9), 0.1) }
         val probs = mapOf("正面回答问题" to 0.52, "先回应情绪" to 0.48)
 
         // Backoff on purpose: an action with a track record generalizes to a new intent, because
         // starting from zero on every unseen intent would make the learning useless in practice.
-        assertTrue(Learner.changedTop(probs, Learner.rerank(m, "恋爱或亲密关系", "只是闲聊", probs)))
+        assertTrue(Learner.changedTop(probs, Learner.rerank(m, "恋人或伴侣", "只是闲聊", probs)))
         assertNotNull(Learner.armFor(m, "朋友", "只是闲聊", "先回应情绪"))
 
         // The same action can be right in one context and wrong in another, and the specific
         // arm is what gets used once it has its own evidence.
         repeat(4) { Learner.observe(m, Learner.Episode("朋友", "只是闲聊", "先回应情绪", 0.2), 0.7) }
         assertTrue(Learner.armFor(m, "朋友", "只是闲聊", "先回应情绪")!!.mean < 0)
-        assertTrue(Learner.armFor(m, "恋爱或亲密关系", "在表达不满", "先回应情绪")!!.mean > 0)
+        assertTrue(Learner.armFor(m, "恋人或伴侣", "在表达不满", "先回应情绪")!!.mean > 0)
     }
 
     @Test fun anUnknownSituationCreditsEachArmOnce() {

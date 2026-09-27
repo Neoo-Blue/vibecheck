@@ -20,8 +20,21 @@ object OpenRouter {
     /** [status] is the HTTP status, or the error code OpenRouter put in a 200 body; 0 when unknown. */
     class Failure(val status: Int, message: String) : Exception(message)
 
-    /** Blocking. Call from a background thread. imageJpegBase64 null means text-only. */
-    fun chat(apiKey: String, model: String, system: String, user: String, imageJpegBase64: String?): String {
+    /**
+     * Blocking. Call from a background thread. imageJpegBase64 null means text-only. A profile
+     * from a long history needs more room and time than a three-line read: [maxTokens] and
+     * [timeoutMs].
+     */
+    fun chat(
+        apiKey: String,
+        model: String,
+        system: String,
+        user: String,
+        imageJpegBase64: String?,
+        maxTokens: Int = 2500,
+        timeoutMs: Int = 60_000,
+        temperature: Double = 0.7,
+    ): String {
         val content = if (imageJpegBase64 == null) JSONObject().put("role", "user").put("content", user)
         else JSONObject().put("role", "user").put(
             "content", JSONArray()
@@ -36,8 +49,8 @@ object OpenRouter {
 
         val body = JSONObject()
             .put("model", model)
-            .put("temperature", 0.7)
-            .put("max_tokens", 2500)
+            .put("temperature", temperature)
+            .put("max_tokens", maxTokens)
             // The output is three short lines. Left to itself the reasoning model spent 18s and
             // its whole budget thinking (one run looped on a homophone), then had nothing to say.
             .put("reasoning", JSONObject().put("effort", "low"))
@@ -50,7 +63,7 @@ object OpenRouter {
         val conn = (URL(ENDPOINT).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 10_000
-            readTimeout = 60_000
+            readTimeout = timeoutMs
             doOutput = true
             setRequestProperty("Authorization", "Bearer $apiKey")
             setRequestProperty("Content-Type", "application/json")
@@ -85,30 +98,27 @@ object OpenRouter {
 
     val DEEP_SYSTEM: String get() = L.t(
         "你是一个懂中文聊天潜台词的分析者。只说有用的话，不寒暄，不复述原文，不写免责声明。" +
+            "有 Ta 的档案就用上：Ta 的性格、喜好、雷区、我们之间的梗，说只对这个人成立的话，别说放在谁身上都对的套话。" +
             "输出三行，每行以「•」开头：第一行说对方真正在意什么，第二行说这一步最容易踩的坑，" +
             "第三行给一个具体到可以照做的下一步。每行不超过 40 个字。",
         "You read the subtext of chat messages. Only say what is useful: no pleasantries, no quoting the " +
-            "messages back, no disclaimers. Output three lines, each starting with \"•\": what they actually " +
-            "care about; the trap in this step; one next move concrete enough to do as written. Max 20 words each.")
+            "messages back, no disclaimers. If there is a profile of them, use it: their character, likes, sore spots, " +
+            "our running jokes. Say what is true of this person, not what would fit anyone. Output three lines, each " +
+            "starting with \"•\": what they actually care about; the trap in this step; one next move concrete enough " +
+            "to do as written. Max 20 words each.")
 
     val REPLY_SYSTEM: String get() = L.t(
-        "你替用户起草回复，用这段对话本身的语言（对话是英文就写英文）。必须贴着用户平时的说话方式：长度、语气、标点、是否用表情都要像他本人。" +
+        "你替我起草回复，用这段对话本身的语言（对话是英文就写英文）。要像我本人对这个人说话：" +
+            "用我平时对 Ta 的称呼、口头禅、语气词、标点、表情和长度；下面有我以前对 Ta 的真实回复就照着那个味道写，学语气和用词，不要照抄原句。" +
+            "可以自然地用上 Ta 的喜好、近况和我们之间的梗，但别硬塞。不要写成客服或心理咨询的口气。" +
             "给三条不同策略的候选：第一条先接住情绪，第二条给具体方案，第三条轻松化解。" +
             "每条单独一行，用「1. 」「2. 」「3. 」开头，每条不超过 30 个字，不要解释。",
-        "You draft replies for the user, in the language the conversation is in. Match how the user " +
-            "actually writes: length, tone, punctuation, whether they use emoji. Give three candidates with " +
-            "different strategies: 1 catches the feeling first, 2 gives a concrete plan, 3 defuses it lightly. " +
-            "One per line, starting \"1. \" \"2. \" \"3. \", max 20 words each, no explanations.")
-
-    val BIO_SYSTEM: String get() = L.t(
-        "你在读一段完整的聊天记录，写一份关于「对方」的档案给「我」以后用。只写记录里能看出来的，不编。" +
-            "四到六行，每行以「•」开头，各不超过 40 字：Ta 是我的什么人（关系与亲疏）；我们常聊什么；" +
-            "Ta 的说话风格（长短、语气、口头禅、用不用表情）；我对 Ta 的说话风格；" +
-            "反复出现的事或雷区；Ta 在乎什么。",
-        "You are reading a complete chat history to write a profile of \"them\" for \"me\" to use later. " +
-            "Only what the history shows; invent nothing. Four to six lines, each starting with \"•\", max 20 words: " +
-            "who they are to me (relationship, closeness); what we usually talk about; how they write (length, tone, " +
-            "catchphrases, emoji); how I write to them; recurring topics or sore spots; what they care about.")
+        "You draft replies for me, in the language the conversation is in. Sound like me talking to this person: " +
+            "the names I use for them, my catchphrases, fillers, punctuation, emoji and length. Where my real past replies " +
+            "to them are given, write in that voice: learn the tone and words, don't copy the lines. Work in their likes, " +
+            "news and our running jokes where they fit naturally, never forced. Never sound like customer service or a " +
+            "therapist. Give three candidates with different strategies: 1 catches the feeling first, 2 gives a concrete " +
+            "plan, 3 defuses it lightly. One per line, starting \"1. \" \"2. \" \"3. \", max 20 words each, no explanations.")
 
     /** "1. ", "1.你好", "1．", "2、", "3) ", "- ", "• ": a numbered or bulleted line, but not "1.5 hours works". */
     private val DRAFT_PREFIX = Regex("""^\s*(\d{1,2}([.．](?!\d)|[、)）])\s*|[-•*·]\s+)""")
@@ -132,25 +142,11 @@ object OpenRouter {
         return s.ifEmpty { line.trim() }
     }
 
-    /** A history read, oldest first, trimmed to what the model needs. */
-    fun bioPrompt(peer: String, history: List<Pair<String, String>>, maxChars: Int = 6000): String {
-        val sb = StringBuilder(L.t("对方：", "Them: ")).append(peer)
-            .append(L.t("\n共 ${history.size} 条，从旧到新：\n", "\n${history.size} messages, oldest first:\n"))
-        // Keep the newest part when it does not all fit: recent history says more about now.
-        // One line per message, so a pasted article cannot eat the whole budget or split the
-        // speaker prefix off its own second line.
-        val lines = history.map { (who, text) -> "${L.who(who)}${L.t("：", ": ")}${text.replace('\n', ' ').take(300)}" }
-        var total = 0
-        val kept = ArrayList<String>()
-        for (l in lines.asReversed()) {
-            if (total + l.length > maxChars) break
-            kept.add(l); total += l.length + 1
-        }
-        kept.asReversed().forEach { sb.append(it).append('\n') }
-        return sb.toString()
-    }
-
-    /** Everything the deep model needs: the same state Jev saw, plus what Jev concluded. */
+    /**
+     * Everything the deep model needs: the same state Jev saw, plus what Jev concluded.
+     * [relationship] and [closeness] are who they are to me when that is known, rather than
+     * guessed this turn; [profile] is the full learned profile (the judge only gets its brief).
+     */
     fun deepPrompt(
         peer: String,
         note: String,
@@ -162,9 +158,15 @@ object OpenRouter {
         fromOcr: Boolean,
         hasImage: Boolean,
         situation: String? = null,
+        relationship: String? = null,
+        closeness: String? = null,
+        profile: String? = null,
     ): String = buildString {
         append(L.t("对方：", "Them: ")).append(peer).append('\n')
+        val who = listOfNotNull(relationship?.takeIf { it.isNotBlank() }, closeness?.takeIf { it.isNotBlank() })
+        if (who.isNotEmpty()) append(L.t("我和对方的关系：", "Relationship: ")).append(who.joinToString(" · ") { L.label(it) }).append('\n')
         if (note.isNotBlank()) append(L.t("关系背景：", "Context: ")).append(note).append('\n')
+        profile?.takeIf { it.isNotBlank() }?.let { append(L.t("\nTa 的档案（从我们的全部聊天记录里学的）：\n", "\nTheir profile (learned from our whole history):\n")).append(it.trim()).append("\n\n") }
         style?.let { append(L.t("我平时的说话方式：", "How I usually write: ")).append(it).append('\n') }
         history?.let { append(L.t("我们最近几轮的走向：", "Where the last few turns went: ")).append(it).append('\n') }
         relation?.let { append(L.t("这段关系的长期观察：", "Long-term observations: ")).append(it).append('\n') }
@@ -188,5 +190,20 @@ object OpenRouter {
             if (hasImage) append(L.t("随附的截图是完整画面，表情包和表情以截图为准。",
                 " The attached screenshot is the full picture; trust it for stickers and emoji."))
         }
+    }
+
+    /**
+     * For reply drafts: how I really talk to this person. Real past exchanges (the ones most like
+     * what they just said, and the latest) and what I say most often, counted from the history.
+     */
+    fun voice(examples: List<Archive.Exchange>, myPhrases: List<Pair<String, Int>>): String = buildString {
+        if (examples.isNotEmpty()) {
+            append(L.t("\n我以前对 Ta 的真实回复（学这个语气，不要照抄）：\n", "\nHow I actually replied to them before (learn the voice, don't copy):\n"))
+            for (e in examples) {
+                append(L.t("对方：", "Them: ")).append(e.theirs.take(80)).append('\n')
+                append(L.t("我：", "Me: ")).append(e.mine.take(80)).append('\n')
+            }
+        }
+        Archive.phraseLine(myPhrases)?.let { append(L.t("\n我对 Ta 最常说的：", "\nWhat I say to them most: ")).append(it).append('\n') }
     }
 }

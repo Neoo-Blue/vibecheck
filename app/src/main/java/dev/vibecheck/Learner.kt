@@ -130,9 +130,20 @@ object Learner {
         for (l in lines.drop(1)) {
             val p = l.split('\t')
             if (p.size < 3) continue
-            m.arms[p[0]] = Arm(p[1].toIntOrNull() ?: 0, p[2].toDoubleOrNull() ?: 0.0)
+            val arm = Arm(p[1].toIntOrNull() ?: 0, p[2].toDoubleOrNull() ?: 0.0)
+            // A renamed situation keeps what was learned under its old name.
+            val key = renamed(p[0])
+            val had = m.arms[key]
+            m.arms[key] = if (had == null || had.n + arm.n == 0) arm
+                else Arm(had.n + arm.n, (had.mean * had.n + arm.mean * arm.n) / (had.n + arm.n))
         }
         return m
+    }
+
+    private fun renamed(key: String): String {
+        val situation = key.substringBefore('|')
+        val now = Relationship.RENAMED[situation] ?: return key
+        return now + key.substring(situation.length)
     }
 
     fun summary(m: Model): List<String> {

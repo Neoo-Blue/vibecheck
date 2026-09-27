@@ -17,28 +17,64 @@ object Person {
         "Messenger", "Messages", "WhatsApp", "Telegram", "Instagram", "LINE", "Signal", "Discord",
         "Snapchat", "QQ", "KakaoTalk", "Viber", "X", "Teams", "Slack", "Calls", "Stories", "People",
         "Back", "Home", "New message", "New chat", "Select contact", "Chat",
+        // What apps call anyone: Soul labels every avatar "Souler", and taking that for a name
+        // filed every Soul chat under one person.
+        "Souler", "Soulmate", "匿名", "匿名用户", "神秘人", "用户", "对方", "好友", "联系人", "未知",
+        "Unknown", "User", "TA", "Ta", "ta",
     )
 
     /** The presence line under a name in a chat header: WhatsApp, Telegram, Messenger, Instagram. */
     private val SUBTITLE = Regex(
         """(Active .*|Online|last seen.*|typing.*|\d+ (members|participants|subscribers|online).*|""" +
-            """tap here for contact info|在线|正在输入.*|最后上线.*|\d+ ?位?成员)""",
+            """tap here for contact info|在线|(对方)?正在(输入|讲话|说话).*|最后上线.*|\d+ ?位?成员)""",
         RegexOption.IGNORE_CASE,
     )
+
+    /** What WeChat and others put where the name was while the other person types. */
+    private val TYPING = Regex("""((对方)?正在(输入|讲话|说话)|.*typing).*""", RegexOption.IGNORE_CASE)
+
+    /** The title band shows a typing indicator instead of the name: the chat itself has not changed. */
+    fun isTyping(titles: List<Pair<String, Chat.Box>>): Boolean = titles.any { TYPING.matches(it.first.trim()) }
 
     /**
      * The contact name from the chat title bar. Candidates are TextViews in the top band of the
      * window; the title is the one nearest the horizontal center. Falls back to an avatar's
      * content description, which WeChat sets to "<名字>头像".
      */
-    fun peerName(titles: List<Pair<String, Chat.Box>>, avatarDescs: List<String>, win: Chat.Box): String? {
+    fun peerName(
+        titles: List<Pair<String, Chat.Box>>,
+        avatarDescs: List<String>,
+        win: Chat.Box,
+        /** Accept a name made only of marks ("...", "。"): true where the app gives text, never for OCR, which reads an emoji as a stray mark. */
+        symbols: Boolean = false,
+    ): String? {
         val center = (win.left + win.right) / 2
         val title = titles
             .filter { looksLikeName(it.first) }
             .minByOrNull { kotlin.math.abs(it.second.centerX - center) }
         if (title != null) return title.first.trim()
-        return avatarDescs.firstOrNull { it.endsWith("头像") && it.length > 2 }
-            ?.removeSuffix("头像")?.trim()
+        avatarDescs.asSequence()
+            .filter { it.endsWith("头像") }
+            .map { it.removeSuffix("头像").trim().removeSuffix("的").trim() }
+            .firstOrNull { it.isNotEmpty() && (looksLikeName(it) || (symbols && looksLikeSymbolName(it))) }
+            ?.let { return it }
+        if (!symbols) return null
+        return titles
+            .filter { looksLikeSymbolName(it.first) }
+            .minByOrNull { kotlin.math.abs(it.second.centerX - center) }
+            ?.first?.trim()
+    }
+
+    /**
+     * "...", "。", "～～": a name made of marks, which some people really choose (Soul is full of
+     * them). Taken only when nothing in the title bar reads as an ordinary name, and never with a
+     * digit in it: unread counts, clocks and battery levels are all digits.
+     */
+    fun looksLikeSymbolName(raw: String): Boolean {
+        val s = raw.trim()
+        if (s.isEmpty() || s in TITLE_JUNK || SUBTITLE.matches(s) || TYPING.matches(s)) return false
+        val cps = s.filterNot { it.isWhitespace() }.codePoints().toArray()
+        return cps.size in 1..12 && cps.none { Character.isDigit(it) }
     }
 
     /**
@@ -47,17 +83,119 @@ object Person {
      */
     fun looksLikeName(raw: String): Boolean {
         val s = raw.trim()
-        if (s.length !in 1..24 || s in TITLE_JUNK || SUBTITLE.matches(s)) return false
-        val solid = s.filterNot { it.isWhitespace() }
-        if (solid.isEmpty()) return false
-        val letters = solid.count { it.isLetter() }
-        if (letters >= 2 && letters * 10 >= solid.length * 6) return true   // at least 60% letters
-        // Names like "🍵" or "Dory🐟" are legitimate; clock and icon noise is not, so require
-        // every character to be either a letter or an emoji.
-        val emoji = solid.codePoints().filter { isEmoji(it) }.count().toInt()
-        val emojiChars = solid.count { Character.isHighSurrogate(it) || Character.isLowSurrogate(it) }
-        return emoji >= 1 && letters + emojiChars + emoji >= solid.length
+        if (s.isEmpty() || s.length > 64 || s in TITLE_JUNK || SUBTITLE.matches(s)) return false
+        // Counted in code points: one emoji is two chars, a family emoji eleven.
+        val cps = s.filterNot { it.isWhitespace() }.codePoints().toArray()
+        if (cps.isEmpty() || cps.size > 24) return false
+        val letters = cps.count { Character.isLetter(it) }
+        if (letters >= 2 && letters * 10 >= cps.size * 6) return true   // at least 60% letters
+        // Names like "🍵", "❤️" or "Dory🐟" are legitimate; clock and icon noise is not, so every
+        // character has to be a letter or part of an emoji: the pictograph itself, or the
+        // variation selector, joiner or skin tone that goes with it.
+        val pictographs = cps.count { isPictograph(it) }
+        val joiners = cps.count { isEmojiPart(it) }
+        return pictographs >= 1 && letters + pictographs + joiners >= cps.size
     }
+
+    /** An emoji or an emoji-like symbol (❤, ☆, ✨), not counting the parts that travel with one. */
+    private fun isPictograph(cp: Int): Boolean =
+        !isEmojiPart(cp) && (isEmoji(cp) || Character.getType(cp) == Character.OTHER_SYMBOL.toInt())
+
+    /** A name with emoji in it: the part OCR cannot read. */
+    fun hasPictograph(s: String): Boolean = s.codePoints().anyMatch { isPictograph(it) }
+
+    /** The text without its emoji: what OCR reads of a name like "欧欧🌸". */
+    fun stripEmoji(s: String): String = buildString {
+        s.codePoints().forEach { if (!isPictograph(it) && !isEmojiPart(it)) appendCodePoint(it) }
+    }.trim()
+
+    // ---- names from notifications ----
+
+    /** "[3条]", "(3)" and the like in front of a message notification. */
+    private val UNREAD = Regex("""^\s*(\[\d+条]|\(\d+\)|（\d+）|\d+ new messages?:?)\s*""", RegexOption.IGNORE_CASE)
+
+    /** QQ's "欧欧 (3条新消息)" after the name. */
+    private val TITLE_COUNT = Regex("""\s*[(（]\d+\s*条(新消息)?[)）]\s*$""")
+
+    /** The app speaking for itself: "你收到了 3 条消息", "5 new messages". */
+    private val SUMMARY = Regex("""收到了?\s*\d+\s*条|\d+\s*条新消息|\d+ new messages|new messages from""", RegexOption.IGNORE_CASE)
+
+    /**
+     * Who a message notification is from, as the app writes the name (emoji and all), and what it
+     * says. WeChat puts "[2条]" in front when several are waiting, and sometimes the sender's name
+     * too. Null for the app's own summaries and anything without both parts.
+     */
+    fun fromNotification(title: String, text: String): Pair<String, String>? {
+        val name = title.replace(TITLE_COUNT, "").trim()
+        var msg = text.replace(UNREAD, "").trim()
+        if (name.isEmpty() || msg.isEmpty() || name.length > 64 || name in TITLE_JUNK) return null
+        if (SUMMARY.containsMatchIn(name) || SUMMARY.containsMatchIn(msg)) return null
+        for (sep in listOf(": ", "：", ":")) if (msg.startsWith(name + sep)) { msg = msg.removePrefix(name + sep).trim(); break }
+        return if (msg.isEmpty()) null else name to msg
+    }
+
+    /**
+     * The full name of a chat whose name OCR could not read in full, from a notification of theirs.
+     * Only names with emoji qualify: OCR reads everything else. One qualifies when what OCR did
+     * read ([readName]) is that name without its emoji ("欧欧" for "欧欧🌸"), or, for a name that is
+     * nothing but emoji ([readName] null), when the notification's message is on screen now.
+     */
+    fun nameFromNotifications(readName: String?, onScreen: List<String>, heard: List<Pair<String, String>>): String? {
+        fun key(x: String) = x.filterNot { it.isWhitespace() }.lowercase()
+        for ((name, msg) in heard.asReversed()) {
+            if (!hasPictograph(name)) continue
+            val bare = stripEmoji(name)
+            if (readName != null) {
+                if (bare.isNotEmpty() && key(bare) == key(readName)) return name
+            } else if (bare.isEmpty() && msg.length >= 2 && onScreen.any { Chat.similar(it, msg) }) return name
+        }
+        return null
+    }
+
+    /**
+     * Where the name sits in a strip of the title bar (pixels, row by row), as left, top, right,
+     * bottom within the strip: the densest band of rows that stand out from the bar's own colour,
+     * and the columns they cover. For a name OCR cannot read, this picture is how it is shown.
+     * Null when nothing stands out.
+     */
+    fun nameBox(px: IntArray, w: Int, h: Int): IntArray? {
+        if (w < 8 || h < 8 || px.size < w * h) return null
+        fun far(a: Int, b: Int) = kotlin.math.abs((a shr 16 and 0xFF) - (b shr 16 and 0xFF)) +
+            kotlin.math.abs((a shr 8 and 0xFF) - (b shr 8 and 0xFF)) + kotlin.math.abs((a and 0xFF) - (b and 0xFF)) > 90
+        val hits = IntArray(h) { y -> val bg = px[y * w]; (0 until w).count { far(px[y * w + it], bg) } }
+        var best: IntRange? = null
+        var bestSum = 0
+        var start = -1
+        var sum = 0
+        var gap = 0
+        for (y in 0..h) {
+            if (y < h && hits[y] >= 2) {
+                if (start < 0) start = y
+                sum += hits[y]
+                gap = 0
+            } else if (start >= 0) {
+                gap++
+                if (gap > 3 || y == h) {
+                    if (sum > bestSum) { bestSum = sum; best = start..(y - gap) }
+                    start = -1; sum = 0; gap = 0
+                }
+            }
+        }
+        val rows = best ?: return null
+        if (rows.last - rows.first + 1 < 6) return null
+        var left = w
+        var right = -1
+        for (y in rows) {
+            val bg = px[y * w]
+            for (x in 0 until w) if (far(px[y * w + x], bg)) { left = minOf(left, x); right = maxOf(right, x) }
+        }
+        if (right - left + 1 < 6) return null
+        return intArrayOf(left, rows.first, right, rows.last)
+    }
+
+    /** Code points that only ever travel inside an emoji: ZWJ, variation selectors, keycap, skin tones, tags. */
+    private fun isEmojiPart(cp: Int): Boolean =
+        cp == 0x200D || cp in 0xFE00..0xFE0F || cp == 0x20E3 || cp in 0x1F3FB..0x1F3FF || cp in 0xE0020..0xE007F
 
     /**
      * Difference hash of the sampled region: a stable id for a chat whose name cannot be read.

@@ -13,7 +13,10 @@ object L {
     fun t(zh: String, en: String): String = if (this.en) en else zh
 
     /** Display text for a Jev option key or card header; the key itself is never translated. */
-    fun label(key: String): String = if (!en) key else LABELS[key] ?: key
+    fun label(key: String): String = if (!en) key else english(key)
+
+    /** The English text for a key whatever the UI language, e.g. to read a model's English answer back. */
+    fun english(key: String): String = LABELS[key] ?: key
 
     /** Speaker labels used inside prompts. */
     fun who(w: String): String = if (!en) w else if (w == "对方") "them" else "me"
@@ -36,9 +39,11 @@ object L {
         "对方心情" to "Their mood",
         "轻松" to "Easy",
         // situation
-        "恋爱或亲密关系" to "romance", "暧昧试探" to "flirting", "朋友" to "friend", "家人" to "family",
+        "恋人或伴侣" to "partner", "暧昧试探" to "flirting", "朋友" to "friend", "家人" to "family",
         "同事或上下级" to "colleague", "客户或生意" to "client / business",
         "陌生人或刚加上" to "stranger / new contact", "客服或办事" to "customer service / errand",
+        // closeness (Relationship.CLOSENESS)
+        "不熟" to "distant", "普通" to "casual", "熟" to "familiar", "很铁" to "close", "无话不谈" to "very close",
         // intent
         "在开玩笑或一起感慨" to "joking or musing together", "在分享观点或心情" to "sharing a thought or mood",
         "单纯想知道答案" to "just wants an answer", "想确认你在不在乎" to "testing whether you care",

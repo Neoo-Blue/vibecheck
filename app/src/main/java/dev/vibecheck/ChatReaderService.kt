@@ -8,6 +8,7 @@ import android.content.ClipboardManager
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.res.Configuration
+import android.app.Notification
 import android.graphics.Bitmap
 import android.graphics.Path
 import android.graphics.Rect
@@ -50,6 +51,11 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         val answers: Map<String, Jev.Answer>,
         val viaOcr: Boolean,
         val situation: String?,
+        /** Who they are to me when that is known (learned or set), not guessed this turn. */
+        val relationship: String?,
+        val closeness: String?,
+        /** The full learned profile; the judge only got its brief. */
+        val profile: String,
     )
 
     /**
@@ -66,6 +72,10 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         val badge: String?,
         val risk: Float,
         val ctx: Ctx,
+        /** What was known about the person when this was judged; see [basisOf]. */
+        val basis: String,
+        /** This turn went into the person's history (Person.Turn). */
+        val recorded: Boolean,
         val sections: LinkedHashMap<String, OverlayCard.Section> = LinkedHashMap(),
     )
 
@@ -74,6 +84,9 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     private val judgeIo = Executors.newSingleThreadExecutor { Thread(it, "vibecheck-judge") }
     /** OpenRouter: deep reads, reply drafts, profiles. Seconds each, so never queued in front of a judgment. */
     private val deepIo = Executors.newFixedThreadPool(2) { Thread(it, "vibecheck-deep") }
+    /** Writing a profile: one coordinator per person, and the notes on stretches of history three at a time. */
+    private val profileIo = Executors.newSingleThreadExecutor { Thread(it, "vibecheck-profile") }
+    private val notesIo = Executors.newFixedThreadPool(3) { Thread(it, "vibecheck-notes") }
     /** Screenshot callbacks: off the main thread (a debug route blocks on one) and never behind a network call. */
     private val shotIo = Executors.newSingleThreadExecutor { Thread(it, "vibecheck-shot") }
 
@@ -91,7 +104,13 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     private var lastCounts = ""
     private var lastTitles = listOf<Pair<String, Chat.Box>>()
     private var lastDescs = listOf<String>()
+    /** Fingerprints from the last OCR pass: their avatar (when one of their messages shows) and the title bar. */
+    private var lastAvatarHash = ""
     private var lastTitleHash = ""
+    /** The name the last conversation was read under, for the moments a typing indicator hides it. */
+    private var lastPeerName: String? = null
+    /** The title bar's name cut out as a picture, from the last OCR pass that could not read it. */
+    private var lastNamePicture: Bitmap? = null
     private var viaOcr = false
     private var onHomeScreen = false
     private var hasInput = false
@@ -113,6 +132,13 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     }
     /** "personId|key" of the judgment in flight. */
     private var inFlight: String? = null
+    /** The judgment in flight is a re-judge of the card on screen, which stays up until it lands. */
+    private var quietFor: String? = null
+    /** Whose chat a history read left scrolled far up, and what it read there; see handle(). */
+    private var heldFor: String? = null
+    private var heldLines: List<Pair<String, String>> = emptyList()
+    /** The verdict Re-check took off the card, until its turn has been judged again. */
+    private var recheckOf: Verdict? = null
     private var forceJudge = false
     private var failStreak = 0
     private var retryAt = 0L
@@ -130,10 +156,16 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     // 学习此人: scroll the chat toward older messages, reading each screen, then write a bio.
     private var learning = false
     private var learnId = ""
+    /** The chat's own id: its history file, which a linked person's other chats do not share. */
+    private var learnOwn = ""
     private var learnPkg = ""
     private val learnHistory = ArrayList<Pair<String, String>>()   // oldest first
     private var learnScrolls = 0
     private var learnStale = 0
+    /** The newest part of what an earlier read kept, when that read reached the first message: reaching it ends this read. */
+    private var learnKept: List<Pair<String, String>> = emptyList()
+    /** People whose profile is being written right now. */
+    private val writing = HashSet<String>()
 
     private val scan = Runnable { scanNow() }
 
@@ -147,7 +179,12 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         prefs.listen(prefListener)
         // No packageNames filter: with one, no event ever arrives from another app, so the card
         // never learns the chat is gone and stays pinned over whatever you open next.
-        serviceInfo = serviceInfo.apply { packageNames = null }
+        // Notifications too: they spell out the names OCR cannot read (emoji). Set here as well as
+        // in the XML, so an update does not wait for the service to be switched off and on.
+        serviceInfo = serviceInfo.apply {
+            packageNames = null
+            eventTypes = eventTypes or AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED
+        }
         Diag.connected = true
         Diag.log("connected, watching ${prefs.packages}")
         syncDebugRoutes()
@@ -181,6 +218,10 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         val pkg = event?.packageName?.toString() ?: return
+        if (event.eventType == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED) {
+            if (pkg in watched) hear(pkg, event)
+            return
+        }
         val stateChange = event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
         // Showing the card is itself a window change: reacting to our own events hid the card
         // a moment after drawing it, which looked like a flash. Our settings screen coming up
@@ -221,6 +262,36 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     }
 
     private val foreignCheck = Runnable { if (!chatOnScreen()) leaveChat("left the chat") }
+
+    /** Recent message notifications from watched apps: package, sender as the app writes it, message. In memory only. */
+    private val heard = ArrayDeque<Triple<String, String, String>>()
+
+    private fun hear(pkg: String, event: AccessibilityEvent) {
+        val extras = (event.parcelableData as? Notification)?.extras ?: return
+        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: return
+        val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: return
+        val (name, msg) = Person.fromNotification(title, text) ?: return
+        heard.addLast(Triple(pkg, name, msg))
+        while (heard.size > 40) heard.removeFirst()
+    }
+
+    /**
+     * A name OCR could not read in full gets its real one, emoji and all, from their
+     * notifications: "欧欧" becomes "欧欧🌸", an unnamed emoji-only chat becomes "🐟". Kept as the
+     * name you would give them, so it shows everywhere; never over one you gave yourself.
+     */
+    private fun nameFromNotifications(record: PersonStore.Record, bubbles: List<Chat.Bubble>) {
+        if (!viaOcr || record.alias.isNotBlank() || record.name == UNKNOWN || heard.isEmpty()) return
+        val read = record.name.takeUnless { Person.isFingerprint(it) }
+        val full = Person.nameFromNotifications(
+            read,
+            bubbles.filter { it.incoming }.takeLast(8).map { it.text },
+            heard.filter { it.first == targetPkg }.map { it.second to it.third },
+        ) ?: return
+        people.setAlias(record.id, full)
+        record.alias = full
+        Diag.log("named ${record.name} \"$full\" from a notification")
+    }
 
     /**
      * Is a watched app still what the user is looking at? The top window by layer decides, not
@@ -267,6 +338,8 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         server?.stop()
         judgeIo.shutdownNow()
         deepIo.shutdownNow()
+        profileIo.shutdownNow()
+        notesIo.shutdownNow()
         shotIo.shutdownNow()
         super.onDestroy()
     }
@@ -317,6 +390,11 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         // to reading the pixels that are already on screen.
         if (bubbles.isEmpty() && prefs.ocr) { ocrScan(); return }
         viaOcr = false
+        // Fingerprints belong to the OCR pass that made them: an old one would name this chat
+        // after whichever chat was captured last.
+        lastAvatarHash = ""
+        lastTitleHash = ""
+        lastNamePicture = null
         handle(bubbles)
     }
 
@@ -363,12 +441,17 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                 // throw away real messages that the card merely covers.
                 val exclude = if (shot.windowOnly) emptyList() else listOfNotNull(card.bounds(), imeBox())
                 val (found, titles) = Chat.fromOcr(placed, win, exclude)
-                val hash = Person.hashOf(fingerprint(shot.bmp, win, found))
+                val avatar = avatarPrint(shot.bmp, win, found)?.let { Person.hashOf(it) }.orEmpty()
+                val title = Person.hashOf(titlePrint(shot.bmp))
+                // No name to read in the title bar: keep a picture of it (the emoji the name is made of).
+                val picture = if (titles.none { Person.looksLikeName(it.first) } && !Person.isTyping(titles)) namePicture(shot.bmp) else null
                 shot.bmp.recycle()
                 if (gen != screenGen) { rescanSoon(); return@read }   // the screen changed under the capture
                 onHomeScreen = Chat.looksLikeHomeScreen(placed, win)
                 hasInput = false
-                lastTitleHash = hash
+                lastAvatarHash = avatar
+                lastTitleHash = title
+                lastNamePicture = picture
                 lastWindow = win
                 lastTitles = titles
                 lastDescs = emptyList()
@@ -403,6 +486,9 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         while (stack.isNotEmpty() && visited < MAX_NODES) {
             val n = stack.removeLast()
             visited++
+            // Hidden views (and whatever is inside them) are not on screen: a hidden label in the
+            // title bar is no one's name, and a message scrolled out of the list is not on show.
+            if (!n.isVisibleToUser) continue
             n.contentDescription?.toString()?.let { if (it.endsWith("头像")) descs.add(it) }
             if (!input && n.isEditable) {
                 // A text field along the bottom is a reply box; chat lists keep their search at the top.
@@ -457,14 +543,22 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             return
         }
 
-        // Who am I talking to? Everything below is scoped to that person.
-        // Emoji-only names are invisible to OCR, so fall back to the title-bar fingerprint
-        // rather than lumping every unreadable chat together under one "unknown" record.
-        val name = Person.peerName(lastTitles, lastDescs, lastWindow)
-            ?: lastTitleHash.takeIf { it.isNotBlank() }?.let { people.resolveFingerprint(targetPkg, it) }
+        // Who am I talking to? Everything below is scoped to that person. While they type, WeChat
+        // shows "对方正在输入..." where the name was: still the same chat. Emoji-only names are
+        // invisible to OCR, so those chats are known by a fingerprint instead of all being lumped
+        // together under one "unknown" record.
+        // A name hidden by typing is not an unreadable one: no fingerprint for it, or a contact
+        // with a perfectly good name would be filed under a stray fingerprint record.
+        val name = Person.peerName(lastTitles, lastDescs, lastWindow, symbols = !viaOcr)
+            ?: (if (Person.isTyping(lastTitles)) lastPeerName?.takeIf { activeId != null } else unreadableName())
             ?: UNKNOWN
+        lastPeerName = name
         val record = people.load(targetPkg, name)
         val id = record.id
+        // Someone known only by a fingerprint: the picture of their name is how they are shown.
+        if (Person.isFingerprint(record.name) && record.alias.isBlank() && !people.hasNamePicture(id))
+            lastNamePicture?.let { people.saveNamePicture(id, it) }
+        nameFromNotifications(record, bubbles)
         val entering = activeId != id
         activeId = id
         currentRecord = record
@@ -488,7 +582,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         // willing to spend an API call: the messages are already on screen, reading them is free.
         // An unreadable name shares one record between people, so nothing is learned into it.
         if (prefs.passive && name != UNKNOWN) observePassively(record, bubbles, entering)
-        Diag.person = "${record.name} (${record.stats.theirMsgs + record.stats.myMsgs} seen, ${record.model.updates} updates)"
+        Diag.person = "${displayName(record)} (${record.stats.theirMsgs + record.stats.myMsgs} seen, ${record.model.updates} updates)"
 
         // Judging costs money and there is nowhere to show it, so stop here when judging is off.
         if (!prefs.enabled) { card.hide(); return }
@@ -500,16 +594,34 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         }
         card.unpause()
 
+        // A history read leaves the chat scrolled far up, on old messages: nothing is judged on
+        // its own until the newest ones are back on screen, something new is, or the chat is
+        // opened again. Judging those old screens used to replace the card with a verdict about
+        // messages from months ago.
+        if (heldFor != null && (heldFor != id || entering ||
+                Chat.pastHistory(record.tail, heldLines, bubbles.map { (if (it.incoming) "对方" else "我") to it.text }))) {
+            heldFor = null
+            heldLines = emptyList()
+        }
+
         // Normally judge only when the other person spoke last. But if the user opened the card
         // themselves, judge the current screen whoever spoke last, or it hangs on "Thinking".
-        val key = Chat.triggerKey(bubbles) ?: (if (forceJudge) Chat.anyKey(bubbles) else null)
+        val key = if (heldFor == id && !forceJudge) null
+            else Chat.triggerKey(bubbles) ?: (if (forceJudge) Chat.anyKey(bubbles) else null)
         val known = verdicts[id]
-        val title = cardTitle(record, null)
+        val title = cardTitle(record, Relationship.pinned(record.rel))
         when {
-            key != null && inFlight == "$id|$key" -> status(L.t("思考中…", "Thinking…"), anchor, "…", title)
+            key != null && inFlight == "$id|$key" -> if (inFlight != quietFor) status(L.t("思考中…", "Thinking…"), anchor, "…", title)
             known != null && known !== cardShows && (key == null || known.key == key || inFlight != null) -> present(known, anchor)
         }
         card.idle(anchor)
+        // Something new is known about the person since the card was judged (a history read, a
+        // relationship chosen by hand, a note): the same messages are judged again, and the card
+        // stays up until the new reading lands.
+        if (known != null && known === cardShows && (key == null || key == known.key) && known.basis != basisOf(record)) {
+            if (inFlight == null) rejudge(record, known, anchor) else rescanSoon(1500)
+            return
+        }
         if (key == null || inFlight == "$id|$key") return
         forceJudge = false
         if (known?.key == key) return
@@ -524,10 +636,30 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         judge(record, bubbles, key, anchor)
     }
 
-    private fun present(v: Verdict, anchor: Rect?) {
+    /**
+     * The card's own messages judged again, quietly: the verdict on it stays up until the new one
+     * lands. From the messages it was judged on rather than the screen, which after a history
+     * read is still far up in the past.
+     */
+    private fun rejudge(record: PersonStore.Record, v: Verdict, anchor: Rect) {
+        val now = System.currentTimeMillis()
+        if (now < retryAt) { rescanSoon(retryAt - now + 50); return }
+        if (Judge.missingKey(prefs) != null) return
+        val bubbles = v.ctx.transcript.map { (who, text) -> Chat.Bubble(text, who == "对方", Chat.Box(0, 0, 0, 0)) }
+        if (bubbles.isEmpty()) return
+        judge(record, bubbles, v.key, anchor, quiet = true, ocr = v.ctx.viaOcr)
+    }
+
+    /** Everything a judgment took from the person rather than the screen: who they are, and what we know. */
+    private fun basisOf(r: PersonStore.Record): String = listOf(
+        Relationship.pinned(r.rel).orEmpty(), Relationship.closeness(r.close).orEmpty(), r.alias,
+        people.background(r, prefs.context),
+    ).joinToString("\u0000")
+
+    private fun present(v: Verdict, anchor: Rect?, keepScroll: Boolean = false) {
         if (cardShows === v) return
         cardShows = v
-        card.show(v.title, v.blocks, v.footer, anchor, v.more, v.badge, v.risk, v.sections)
+        card.show(v.title, v.blocks, v.footer, anchor, v.more, v.badge, v.risk, v.sections, keepScroll)
     }
 
     /** One line in place of a judgment. Drawn only when it changes, not on every scan. */
@@ -538,31 +670,47 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         if (title == null) card.showText(text, anchor, badge) else card.showText(text, anchor, badge, title)
     }
 
-    private fun judge(record: PersonStore.Record, bubbles: List<Chat.Bubble>, key: String, anchor: Rect) {
+    private fun judge(
+        record: PersonStore.Record,
+        bubbles: List<Chat.Bubble>,
+        key: String,
+        anchor: Rect,
+        quiet: Boolean = false,
+        ocr: Boolean = viaOcr,
+    ) {
         val id = record.id
         inFlight = "$id|$key"
-        status(L.t("思考中…", "Thinking…"), anchor, "…", cardTitle(record, null))
+        // Known (learned or set by hand): Jev is told, not asked, so one turn cannot contradict it.
+        val rel = Relationship.pinned(record.rel)
+        val close = Relationship.closeness(record.close)
+        if (quiet) {
+            quietFor = inFlight
+            card.flash(L.t("按更新后的关系和档案重新判断…", "Re-checking with the updated relationship and profile…"))
+        } else status(L.t("思考中…", "Thinking…"), anchor, "…", cardTitle(record, rel))
 
         val lastIncoming = (bubbles.lastOrNull { it.incoming } ?: bubbles.last()).text
         val transcript = Chat.transcript(bubbles)
         val background = people.background(record, prefs.context)
+        val basis = basisOf(record)
         val style = Person.styleSummary(record.style)
         val history = Person.historySummary(record.history)
         val relation = Relation.summary(record.stats)
-        val ocr = viaOcr
         val state = Jev.stateJson(
             context = background,
             transcript = transcript,
-            peer = record.name.takeUnless { it == UNKNOWN || Person.isFingerprint(it) },
+            peer = record.alias.ifBlank { record.name }.takeUnless { it == UNKNOWN || Person.isFingerprint(it) },
             style = style,
             history = history,
             relation = relation,
             source = if (ocr) OCR_CAVEAT else null,
+            relationship = rel,
+            closeness = close,
         )
+        val triageBody = Jev.triageBody(state, askSituation = rel == null)
         // This record copy is not touched again (the answer is applied to a fresh load), so the
         // judge thread may read its model.
         val model = if (prefs.learning) record.model else Learner.Model()
-        Diag.lastRequest = Jev.triageBody(state)
+        Diag.lastRequest = triageBody
         Diag.log("ask: ${transcript.size} lines of context")
         val started = System.currentTimeMillis()
 
@@ -571,11 +719,11 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         // instead of every chat getting the same five blocks.
         judgeIo.execute {
             prefs.countUse(Prefs.USE_JUDGE)
-            val triage = runCatching { Judge.ask(prefs, Jev.triageBody(state)) }
+            val triage = runCatching { Judge.ask(prefs, triageBody) }
             // Routed on the danger this person's history calibrates to, not the raw reading.
             val routine = triage.map { Jev.isRoutine(calibrated(it, model)) }.getOrDefault(false)
             // No situation answer at all still gets the default set, not a two-block card.
-            val situation = triage.getOrNull()?.let { (it["situation"] as? Jev.Answer.Dist)?.top } ?: ""
+            val situation = rel ?: triage.getOrNull()?.let { (it["situation"] as? Jev.Answer.Dist)?.top } ?: ""
             val merged = triage.mapCatching { t ->
                 if (routine) t else {
                     prefs.countUse(Prefs.USE_JUDGE)
@@ -583,7 +731,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                 }
             }
             main.post {
-                judged(id, key, merged, routine, situation, bubbles, lastIncoming, transcript, background, ocr, started)
+                judged(id, key, merged, routine, situation, rel, basis, bubbles, lastIncoming, transcript, background, ocr, started)
             }
         }
     }
@@ -601,6 +749,8 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         result: Result<Map<String, Jev.Answer>>,
         routine: Boolean,
         situation: String,
+        rel: String?,
+        basis: String,
         bubbles: List<Chat.Bubble>,
         lastIncoming: String,
         transcript: List<Pair<String, String>>,
@@ -609,6 +759,8 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         started: Long,
     ) {
         inFlight = null
+        val quiet = quietFor == "$id|$key"
+        quietFor = null
         // Shown only if the user is still in that chat and has not paused it meanwhile; kept either
         // way, so coming back shows it instead of paying for the same question twice.
         val visible = id == activeId && !unsettled && !prefs.snoozed && !people.isMuted(id)
@@ -621,11 +773,16 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             // Reloaded rather than reused: passive counting may have saved newer counts for this
             // person while the call was out, and saving the copy from before would undo them.
             val record = people.loadId(id)
-            val learned = applyLearning(record, raw, bubbles, lastIncoming)
+            // The same turn judged again (Re-check, a new profile, a relationship set by hand)
+            // replaces the earlier reading of it rather than counting as one more turn.
+            val before = (verdicts[id] ?: recheckOf?.takeIf { it.personId == id })?.takeIf { it.key == key }
+            recheckOf = null
+            val learned = applyLearning(record, raw, bubbles, lastIncoming, situation, before)
             val ctx = Ctx(
-                record.name, background,
+                displayName(record), record.note.ifBlank { if (record.bio.isBlank()) prefs.context else "" },
                 Person.styleSummary(record.style), Person.historySummary(record.history),
-                Relation.summary(record.stats), transcript, learned.answers, ocr, situation,
+                Relation.summary(record.stats), transcript, learned.answers, ocr, situation, rel,
+                Relationship.closeness(record.close), record.bio,
             )
             val danger = learned.answers["danger"] as? Jev.Answer.Scored
             val risk = (Jev.risk(learned.answers) ?: 0.0).toFloat()
@@ -634,13 +791,16 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             val v = Verdict(
                 id, key, cardTitle(record, situation), blocks,
                 if (routine) emptyList() else Jev.more(learned.answers),
-                if (routine) null else footerWith(learned),
+                if (routine) null else footerWith(learned, Profile.hint(record.bio, learned.answers)),
                 if (routine) "·" else danger?.let { "${Jev.shownLevel(it)}" },
-                risk, ctx,
+                risk, ctx, basis, learned.recorded,
             )
+            // Judged again because something new is known: what the history read found stays
+            // under the new card. Deep reads and drafts go: they were written on the old footing.
+            verdicts[id]?.takeIf { it.basis != basis }?.sections?.get(LEARN)?.let { v.sections[LEARN] = it }
             verdicts[id] = v
             if (visible) {
-                present(v, null)
+                present(v, null, keepScroll = quiet)
                 if (prefs.buzz && risk >= 0.75f && lastBuzz != "$id|$key") { lastBuzz = "$id|$key"; buzz() }
                 // Only for a chat still on screen: nobody reads a deep pass about a chat they left.
                 if (!routine && prefs.autoDeep && prefs.orKey.isNotBlank()) deepCall(DEEP, v, openCard = false)
@@ -654,27 +814,44 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             retryAt = now + if (Judge.isFatal(e)) FATAL_BACKOFF_MS else Judge.backoffMs(failStreak)
             Diag.lastError = "ask: ${e.message}"
             Diag.log(Diag.lastError)
-            if (visible) status(L.t("Jev 调用失败：", "Jev call failed: ") + lastFailure, null, "!")
+            // A failed re-judge leaves the card as it was, with a note, rather than an error in its place.
+            if (visible) {
+                if (quiet) card.flash(L.t("重新判断失败：", "Re-check failed: ") + lastFailure)
+                else status(L.t("Jev 调用失败：", "Jev call failed: ") + lastFailure, null, "!")
+            }
             rescanSoon(retryAt - now + 50)
         }
     }
 
-    private fun cardTitle(r: PersonStore.Record, situation: String?): String =
-        listOfNotNull(displayName(r.name), situation?.takeIf { it.isNotBlank() }?.let { L.label(it) }).joinToString(" · ")
+    /**
+     * "欧欧 · 朋友 · 很铁": who, what kind of chat, how close. A misread contact shows at a glance.
+     * Someone whose name is only a picture (emoji OCR cannot read) gets the picture there.
+     */
+    private fun cardTitle(r: PersonStore.Record, situation: String?): String = listOfNotNull(
+        if (people.namePicture(r.id) != null) OverlayCard.NAME_PICTURE.toString() else displayName(r),
+        situation?.takeIf { it.isNotBlank() }?.let { L.label(it) },
+        Relationship.closeness(r.close)?.let { L.label(it) },
+    ).joinToString(" · ")
 
-    private fun displayName(name: String): String = when {
-        name == UNKNOWN -> L.t("认不出是谁", "Unknown contact")
-        Person.isFingerprint(name) -> L.t("未命名联系人", "Unnamed contact")
-        else -> name
+    private fun displayName(r: PersonStore.Record): String = when {
+        r.alias.isNotBlank() -> r.alias
+        r.name == UNKNOWN -> L.t("认不出是谁", "Unknown contact")
+        Person.isFingerprint(r.name) -> L.t("未命名联系人", "Unnamed contact")
+        else -> r.name
     }
 
     private fun debugCard(bubbles: List<Chat.Bubble>) {
         // Always draw in debug mode, even with nothing left after filtering: a blank screen
         // cannot tell you whether the service is dead, blocked, or just over-filtering.
-        val lines = if (bubbles.isEmpty()) listOf(lastCounts, L.t("窗口 ", "window ") +
+        val read = if (bubbles.isEmpty()) listOf(lastCounts, L.t("窗口 ", "window ") +
             "${lastWindow.left},${lastWindow.top}-${lastWindow.right},${lastWindow.bottom}")
         else bubbles.takeLast(4).map { (if (it.incoming) L.t("对方: ", "them: ") else L.t("我: ", "me: ")) + it.text.take(24) }
-        val who = Person.peerName(lastTitles, lastDescs, lastWindow) ?: L.t("认不出是谁", "unknown contact")
+        // Where the name comes from, so a misread one can be told apart from a missing one.
+        val lines = read + listOfNotNull(
+            L.t("标题栏：", "Title bar: ") + lastTitles.joinToString(" | ") { it.first.take(16) }.ifEmpty { "—" },
+            lastDescs.takeIf { it.isNotEmpty() }?.let { d -> L.t("头像描述：", "Avatar labels: ") + d.distinct().take(3).joinToString(" | ") { it.take(16) } },
+        )
+        val who = Person.peerName(lastTitles, lastDescs, lastWindow, symbols = !viaOcr) ?: L.t("认不出是谁", "unknown contact")
         val where = if (Chat.inConversation(bubbles, hasInput)) L.t("聊天页", "a chat") else L.t("不是聊天页", "not a chat")
         cardFor = null
         cardShows = null
@@ -700,7 +877,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
 
     // ---- learning ----
 
-    private class Learned(val answers: Map<String, Jev.Answer>, val adjusted: Boolean, val reward: Double?)
+    private class Learned(val answers: Map<String, Jev.Answer>, val adjusted: Boolean, val reward: Double?, val recorded: Boolean = false)
 
     /**
      * Score the previous card against this turn, then bend this turn's numbers by what we
@@ -711,6 +888,8 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         raw: Map<String, Jev.Answer>,
         bubbles: List<Chat.Bubble>,
         lastIncoming: String,
+        situation: String,
+        before: Verdict?,
     ): Learned {
         val score = raw["danger"] as? Jev.Answer.Scored
         val levels = (score?.levels ?: 1).coerceAtLeast(2)
@@ -724,8 +903,9 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
 
         var reward: Double? = null
         pending?.let { ep ->
-            // Only settle an episode against the same person it was opened for.
-            if (pendingId == record.id && Chat.repliedSince(bubbles, pendingText)) {
+            // Only settle an episode against the same person it was opened for, and never against
+            // a second reading of its own turn: that would score the advice against itself.
+            if (before == null && pendingId == record.id && Chat.repliedSince(bubbles, pendingText)) {
                 reward = Learner.observe(record.model, ep, rawNorm)
                 Diag.log("learn ${record.name}: ${ep.intent}|${ep.action} reward=${"%+.2f".format(reward)}")
             }
@@ -737,30 +917,33 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         out["danger"] = Jev.Answer.Scored(calibrated * (levels - 1), levels)
 
         val intent = (raw["intent"] as? Jev.Answer.Dist)?.top ?: "unknown"
-        val situation = (raw["situation"] as? Jev.Answer.Dist)?.top ?: "*"
-        Relation.judged(record.stats, calibrated)
+        // The relationship the turn was judged as: known, or this turn's answer.
+        val sit = situation.ifBlank { "*" }
+        if (before == null) Relation.judged(record.stats, calibrated)
         var adjusted = false
+        var recorded = false
         (raw["action"] as? Jev.Answer.Dist)?.let { dist ->
-            val reranked = Learner.rerank(record.model, situation, intent, dist.probs)
+            val reranked = Learner.rerank(record.model, sit, intent, dist.probs)
             adjusted = Learner.changedTop(dist.probs, reranked)
             val top = reranked.maxByOrNull { it.value }?.key ?: dist.top
             out["action"] = Jev.Answer.Dist(top, reranked)
-            pending = Learner.Episode(situation, intent, top, calibrated, rawNorm)
+            pending = Learner.Episode(sit, intent, top, calibrated, rawNorm)
             pendingId = record.id
             pendingText = lastIncoming
-            record.history = Person.push(
-                record.history,
-                Person.Turn(intent, Math.round(calibrated * (levels - 1)).toInt() + 1, top)
-            )
+            val turn = Person.Turn(intent, Math.round(calibrated * (levels - 1)).toInt() + 1, top)
+            record.history = if (before?.recorded == true && record.history.isNotEmpty()) record.history.dropLast(1) + turn
+                else Person.push(record.history, turn)
+            recorded = true
         }
         people.save(record)
-        return Learned(out, adjusted, reward)
+        return Learned(out, adjusted, reward, recorded)
     }
 
-    private fun footerWith(l: Learned): String? {
+    /** The takeaway, what this person's profile says about a moment like this, and whether experience moved things. */
+    private fun footerWith(l: Learned, hint: String?): String? {
         val base = Jev.footer(l.answers)
         val note = if (l.adjusted) L.t("（已按你们过去的走向调整）", "(adjusted from how things went before)") else null
-        return listOfNotNull(base, note).joinToString("\n").ifBlank { null }
+        return listOfNotNull(base, hint, note).joinToString("\n").ifBlank { null }
     }
 
     /**
@@ -777,6 +960,9 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         record.tail = sync.tail
         record.legacySeen = ""
         if (sync.fresh.isNotEmpty()) {
+            // A person whose history is kept keeps it current, so the next read only needs what
+            // it missed; nobody else's messages are stored.
+            if (sync.aligned) people.appendArchive(record.own, sync.fresh)
             val fresh = bubbles.takeLast(sync.fresh.size)
             fresh.filter { !it.incoming }.forEach { Person.observe(record.style, it.text) }
             val now = System.currentTimeMillis()
@@ -798,7 +984,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     }
 
     override fun onRescan() {
-        activeId?.let { verdicts.remove(it) }
+        recheckOf = activeId?.let { verdicts.remove(it) }
         cardShows = null
         forceJudge = true
         failStreak = 0
@@ -822,6 +1008,39 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         if (prefs.snoozed) prefs.snoozeUntil = 0L
         activeId?.let { if (people.isMuted(it)) people.setMuted(it, false) }
         rescanSoon()
+    }
+
+    override fun relationNow(): String? =
+        currentRecord?.takeIf { it.id == activeId && it.name != UNKNOWN }?.let { people.relationOf(it.id) }
+
+    /** Who they are to me, chosen on the card ("" = work it out). The card is judged again at once. */
+    override fun onSetRelation(key: String) {
+        val r = currentRecord?.takeIf { it.id == activeId && it.name != UNKNOWN } ?: return
+        people.setRelation(r.id, key)
+        Diag.log("relationship for ${r.name}: ${key.ifEmpty { "auto" }}")
+        card.flash(if (key.isEmpty()) L.t("关系：自动判断", "Relationship: worked out automatically") else L.t("关系已设为：", "Relationship set: ") + L.label(key))
+        rescanSoon()
+    }
+
+    override fun namePicture(): Bitmap? = currentRecord?.takeIf { it.id == activeId }?.let { people.namePicture(it.id) }
+
+    override fun closenessNow(): String? =
+        currentRecord?.takeIf { it.id == activeId && it.name != UNKNOWN }?.let { people.closenessOf(it.id) }
+
+    override fun onSetCloseness(key: String) {
+        val r = currentRecord?.takeIf { it.id == activeId && it.name != UNKNOWN } ?: return
+        people.setCloseness(r.id, key)
+        Diag.log("closeness for ${r.name}: ${key.ifEmpty { "unknown" }}")
+        card.flash(if (key.isEmpty()) L.t("亲近程度：交给学习判断", "Closeness: left to learning") else L.t("亲近程度：", "Closeness: ") + L.label(key))
+        rescanSoon()
+    }
+
+    /** Naming someone happens in the app, where there is a keyboard to type with. */
+    override fun onRename() {
+        val r = currentRecord?.takeIf { it.id == activeId && it.name != UNKNOWN } ?: return
+        leaveChat("naming a contact")
+        startActivity(Intent(this, MainActivity::class.java).putExtra(MainActivity.EXTRA_PERSON, r.id).addFlags(
+            Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP))
     }
 
     override fun onSettings() {
@@ -913,11 +1132,22 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         val system = if (kind == REPLY) OpenRouter.REPLY_SYSTEM else OpenRouter.DEEP_SYSTEM
         val send = { image: String? ->
             val model = if (image != null) prefs.visionModel else prefs.deepModel
-            val prompt = OpenRouter.deepPrompt(
-                displayName(c.name), c.note, c.style, c.history, c.relation,
-                c.transcript, c.answers, c.viaOcr, image != null, c.situation,
-            )
             deepIo.execute {
+                var prompt = OpenRouter.deepPrompt(
+                    c.name, c.note, c.style, c.history, c.relation,
+                    c.transcript, c.answers, c.viaOcr, image != null, c.situation, c.relationship, c.closeness, c.profile,
+                )
+                // Drafts in my voice: how I actually answered this person before, from the kept history.
+                if (kind == REPLY) {
+                    val history = people.archiveAll(v.personId)
+                    if (history.isNotEmpty()) {
+                        val said = c.transcript.takeLast(4).filter { it.first == "对方" }.takeLast(2).joinToString(" ") { it.second }
+                        prompt += OpenRouter.voice(
+                            Archive.examples(history, said, k = 8, exclude = c.transcript.map { it.second }.toSet()),
+                            Archive.phrases(history, "我"),
+                        )
+                    }
+                }
                 val started = System.currentTimeMillis()
                 val r = runCatching { OpenRouter.chat(prefs.orKey, model, system, prompt, image) }
                 r.onSuccess { Diag.log("deep($model) ok in ${System.currentTimeMillis() - started}ms") }
@@ -925,8 +1155,9 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                 main.post { deepDone(kind, tag, v, title, r) }
             }
         }
-        // A picture of a different chat would contradict the transcript, so only while still in this one.
-        if (c.viaOcr && activeId == v.personId) captureChat(hideOverlay = true) { shot, note ->
+        // A picture of a different chat, or of this one scrolled back into its history after a read,
+        // would contradict the transcript, so only while this chat's messages are on screen.
+        if (c.viaOcr && activeId == v.personId && heldFor != v.personId) captureChat(hideOverlay = true) { shot, note ->
             send(shot?.let { val s = toJpegBase64(it.bmp); it.bmp.recycle(); s }.also { if (it == null) Diag.log("deep: no image, $note") })
         } else send(null)
     }
@@ -962,6 +1193,9 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
 
     // ---- 学习此人: the history read ----
 
+    /** Why a history read ended, which decides whether it covers the whole history. */
+    private enum class LearnEnd { TOP, KNOWN, STOPPED, CAP }
+
     override fun onLearn() {
         val title = L.t("学习此人", "Learn this person")
         val rec = currentRecord?.takeIf { it.id == activeId }
@@ -974,13 +1208,20 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             return
         }
         if (learning) return
+        if (rec.id in writing) {
+            card.setSection(LEARN, OverlayCard.Section(title, listOf(L.t("还在整理上次读到的记录，好了会显示在这里", "Still writing up the last read; it will show here"))), true)
+            return
+        }
         learning = true
         learnId = rec.id
+        learnOwn = rec.own
         learnPkg = targetPkg
         learnHistory.clear()
         learnScrolls = 0
         learnStale = 0
-        Diag.log("learn: reading ${rec.name}'s history")
+        // A history kept from a read that went all the way back only needs what came after it.
+        learnKept = if (people.archiveComplete(rec.own)) people.archive(rec.own).takeLast(Archive.MERGE_WINDOW) else emptyList()
+        Diag.log("learn: reading ${rec.name}'s history" + if (learnKept.isNotEmpty()) " (since the last read)" else "")
         card.learning(0)
         learnStep()
     }
@@ -989,7 +1230,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     override fun onStopLearning() {
         if (!learning) return
         Diag.log("learn: stopped by the user")
-        finishLearning()
+        finishLearning(LearnEnd.STOPPED)
     }
 
     /** A capture that never calls back (screenshot or OCR hung) must not leave learn mode on forever. */
@@ -1002,8 +1243,9 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
 
     /**
      * One page of the history read: capture what is on screen, keep what is new, then scroll
-     * toward older messages and go again. Stops when four pages in a row add nothing (the top
-     * of the history, or a stretch of nothing but pictures) or at a hard cap.
+     * toward older messages and go again. Ends at the first message (a few pages in a row that
+     * add nothing), on reaching what an earlier read kept, when the bubble is tapped, or at a
+     * very high cap.
      */
     private fun learnStep() {
         if (!learning) return
@@ -1020,92 +1262,209 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             if (fresh.isEmpty()) learnStale++ else learnStale = 0
             learnScrolls++
             card.learning(learnHistory.size)
-            if (learnStale >= 4 || learnScrolls >= MAX_LEARN_PAGES) { finishLearning(); return@captureBubbles }
+            val end = when {
+                Archive.reached(learnKept, page) -> LearnEnd.KNOWN
+                learnStale >= STALE_PAGES -> LearnEnd.TOP
+                learnScrolls >= MAX_LEARN_PAGES -> LearnEnd.CAP
+                else -> null
+            }
+            if (end != null) { finishLearning(end); return@captureBubbles }
             val w = resources.displayMetrics.widthPixels.toFloat()
             val h = resources.displayMetrics.heightPixels.toFloat()
             // Drag downward: the list follows the finger, revealing older messages at the top.
+            // Just over half a screen, so pages still overlap by a few messages to line up on.
             // The next step is on a timer, not the gesture callback: a callback that never comes
             // must not leave learn mode stuck on and every judgment switched off.
-            swipe(w / 2, h * 0.32f, w / 2, h * 0.78f)
+            swipe(w / 2, h * 0.28f, w / 2, h * 0.82f)
             main.removeCallbacks(learnNext)
-            main.postDelayed(learnNext, 1800)
+            main.postDelayed(learnNext, LEARN_STEP_MS)
         }
     }
 
     private fun abortLearning(why: String) {
         if (!learning) return
         learning = false
+        heldFor = learnId
+        heldLines = ArrayList(learnHistory)
         main.removeCallbacks(learnWatchdog)
         main.removeCallbacks(learnNext)
         Diag.log("learn: aborted ($why), ${learnHistory.size} read")
         card.learning(null)
     }
 
-    private fun finishLearning() {
+    private fun finishLearning(end: LearnEnd) {
         learning = false
+        heldFor = learnId
+        heldLines = ArrayList(learnHistory)
         main.removeCallbacks(learnWatchdog)
         main.removeCallbacks(learnNext)
         card.learning(null)
+        val id = learnId
+        val own = learnOwn
         val title = L.t("学习此人", "Learn this person")
-        val history = ArrayList(learnHistory)
-        Diag.log("learn: read ${history.size}")
+        val read = ArrayList(learnHistory)
+        Diag.log("learn: read ${read.size} ($end)")
+
+        // Joined onto what was kept. A read that reached the kept history adds what came since; a
+        // read that reached the first message is the whole history; anything else extends what
+        // was kept where the two line up, and is otherwise kept after it, marked incomplete so
+        // the next read goes all the way back.
+        val kept = people.archive(own)
+        val (history, complete) = when {
+            kept.isEmpty() -> read to (end == LearnEnd.TOP)
+            end == LearnEnd.TOP && read.size >= kept.size -> read to true
+            else -> Archive.merge(kept, read)?.let { it to (people.archiveComplete(own) || end == LearnEnd.TOP) }
+                ?: ((kept + read) to false)
+        }
         if (history.size < 4) {
-            learnResult(title, listOf(L.t("只读到 ${history.size} 条，不够写档案", "Only ${history.size} messages read, not enough for a profile")))
+            learnResult(id, title, listOf(L.t("只读到 ${history.size} 条，不够写档案", "Only ${history.size} messages read, not enough for a profile")))
             return
         }
+        people.saveArchive(own, history, complete)
+
         // Reloaded: the record may have moved on since the read began.
-        val rec = people.loadId(learnId)
+        val rec = people.loadId(id)
+        val all = people.archiveAll(id)
         // A full read is the better baseline than what was seen live, so it replaces the counts
-        // and my style rather than adding on top. A read that stopped short (sticker stretch,
-        // page cap, stopped by hand) and covers less than the live count is kept for the bio only.
+        // and my style rather than adding on top; less than the live count, and it does not.
         val stats = rec.stats
-        if (history.size >= stats.theirMsgs + stats.myMsgs) {
+        if (all.size >= stats.theirMsgs + stats.myMsgs) {
             stats.theirMsgs = 0; stats.myMsgs = 0; stats.theirChars = 0; stats.myChars = 0
-            Relation.observeBulk(stats, history)
+            Relation.observeBulk(stats, all)
             val style = Person.Style()
-            history.filter { it.first == "我" }.forEach { Person.observe(style, it.second) }
+            all.filter { it.first == "我" }.forEach { Person.observe(style, it.second) }
             rec.style = style
         }
         // The read began at the newest screen: live counting carries on from there, not from the
         // top of the history the read ended on.
         if (rec.tail.isEmpty()) rec.tail = history.takeLast(Chat.TAIL)
-        rec.learned = history.size
+        rec.learned = all.size
         people.save(rec)
 
         if (prefs.orKey.isBlank()) {
-            learnResult(title, listOf(
-                L.t("读了 ${history.size} 条，统计已更新", "Read ${history.size} messages, statistics updated"),
+            learnResult(id, title, listOf(
+                L.t("读了 ${read.size} 条，存了 ${all.size} 条，统计已更新", "Read ${read.size}, kept ${all.size} messages, statistics updated"),
                 L.t("填了 OpenRouter Key 才能写档案", "Add an OpenRouter key to get a profile")))
             return
         }
-        learnResult(title, listOf(L.t("读了 ${history.size} 条，正在写档案…", "Read ${history.size} messages, writing the profile…")))
-        val prompt = OpenRouter.bioPrompt(rec.name, history)
-        prefs.countUse(Prefs.USE_BIO)
-        val id = rec.id
-        deepIo.execute {
-            val r = runCatching { OpenRouter.chat(prefs.orKey, prefs.deepModel, OpenRouter.BIO_SYSTEM, prompt, null) }
+        writeProfile(id, read.size)
+    }
+
+    /**
+     * The profile from everything kept for this person. A long history goes in stretches: notes
+     * on each (three at a time, and never again for a stretch already noted), then one profile
+     * from all the notes. The card shows how far it has got.
+     */
+    private fun writeProfile(id: String, readNow: Int) {
+        val rec = people.loadId(id)
+        val name = displayName(rec)
+        val title = L.t("学习此人", "Learn this person")
+        val key = prefs.orKey
+        val model = prefs.deepModel
+        writing += id
+        learnResult(id, title, listOf(L.t("读了 $readNow 条，开始写档案…", "Read $readNow messages, starting the profile…")))
+        profileIo.execute {
+            val history = people.archiveAll(id)
+            val chunks = Archive.chunks(history, CHUNK_CHARS)
+            val chars = history.sumOf { it.second.length }
+            val amount = if (L.en) (if (chars < 1000) "$chars characters" else "~${(chars + 500) / 1000}k characters")
+                else if (chars < 10_000) "$chars 字" else "约 ${"%.1f".format(chars / 10_000.0)} 万字"
+            val size = L.t("读了 $readNow 条，共存 ${history.size} 条（$amount）", "Read $readNow, kept ${history.size} messages ($amount)")
+            val progress = { done: Int ->
+                main.post { learnResult(id, title, listOf(size, L.t("正在写档案：$done / ${chunks.size}", "Writing the profile: $done of ${chunks.size}")), open = false) }
+                Unit
+            }
+            val r = runCatching { profileFrom(id, name, history, chunks, key, model, progress) }
             main.post {
-                r.onSuccess { bio ->
-                    // Saved onto a fresh copy: a scan during the call may have moved the counts on.
-                    val fresh = people.loadId(id)
-                    fresh.bio = bio.trim()
-                    people.save(fresh)
-                    Diag.log("learn: profile written for ${fresh.name}")
-                    learnResult(L.t("已学会 ${fresh.name}（${history.size} 条）", "Learned ${fresh.name} (${history.size} messages)"),
-                        bio.lines().map { it.trim() }.filter { it.isNotEmpty() })
-                }.onFailure {
-                    Diag.log("learn: profile failed ${it.message}")
-                    learnResult(title, listOf(L.t("读了 ${history.size} 条，档案没写成：", "Read ${history.size} messages, profile failed: ") + Judge.describe(it)))
-                }
+                writing -= id
+                r.onSuccess { (text, skipped) -> profileDone(id, history.size, text, skipped) }
+                    .onFailure {
+                        Diag.log("learn: profile failed ${it.message}")
+                        learnResult(id, title, listOf(size, L.t("档案没写成：", "The profile failed: ") + Judge.describe(it),
+                            L.t("读到的都存下了，再点「学习」只会补写没写完的部分", "Everything read is kept; Learn again only redoes what is missing")))
+                    }
             }
         }
     }
 
+    /** Blocking. The profile text, and how many stretches could not be noted. */
+    private fun profileFrom(
+        id: String,
+        name: String,
+        history: List<Pair<String, String>>,
+        chunks: List<IntRange>,
+        key: String,
+        model: String,
+        progress: (Int) -> Unit,
+    ): Pair<String, Int> {
+        fun ask(system: String, prompt: String, tokens: Int): String {
+            prefs.countUse(Prefs.USE_BIO)
+            return OpenRouter.chat(key, model, system, prompt, null, maxTokens = tokens, timeoutMs = 180_000, temperature = 0.4)
+        }
+        if (chunks.size <= 1) {
+            progress(0)
+            return ask(Profile.profileSystem(false), Profile.profilePrompt(name, history, Archive.text(history), false), 5000) to 0
+        }
+        val texts = chunks.map { Archive.text(history, it) }
+        val hashes = texts.map { Archive.hash(it) }
+        val cached = people.notes(id)
+        val notes = arrayOfNulls<String>(chunks.size)
+        for (i in chunks.indices) notes[i] = cached[hashes[i]]
+        var done = notes.count { it != null }
+        progress(done)
+        val jobs = chunks.indices.filter { notes[it] == null }.map { i ->
+            i to notesIo.submit<String> {
+                // One retry: a long run of calls meets the odd timeout.
+                runCatching { ask(Profile.NOTES_SYSTEM, Profile.notesPrompt(name, i + 1, chunks.size, texts[i]), 2500) }
+                    .getOrElse { ask(Profile.NOTES_SYSTEM, Profile.notesPrompt(name, i + 1, chunks.size, texts[i]), 2500) }
+            }
+        }
+        var failure: Throwable? = null
+        for ((i, job) in jobs) {
+            notes[i] = runCatching { job.get() }.onFailure { failure = it.cause ?: it }.getOrNull()
+            done++
+            progress(done)
+        }
+        // Kept even if the profile below fails: the next read pays only for what is missing.
+        people.saveNotes(id, chunks.indices.filter { notes[it] != null }.associate { hashes[it] to notes[it]!! })
+        var layer = notes.filterNotNull()
+        if (layer.isEmpty()) throw failure ?: IllegalStateException("no notes")
+        // More notes than one pass can take: merged a group at a time first.
+        while (layer.size > 1 && layer.sumOf { it.length } > REDUCE_CHARS) {
+            val groups = Profile.groups(layer, REDUCE_CHARS / 2)
+            if (groups.size >= layer.size) break
+            layer = groups.map { g -> if (g.size == 1) g[0] else ask(Profile.MERGE_SYSTEM, Profile.mergePrompt(name, g), 3000) }
+        }
+        val body = layer.withIndex().joinToString("\n\n") { (i, n) -> "--- ${i + 1} ---\n$n" }
+        return ask(Profile.profileSystem(true), Profile.profilePrompt(name, history, body, true), 5000) to notes.count { it == null }
+    }
+
+    private fun profileDone(id: String, total: Int, text: String, skipped: Int) {
+        // Saved onto a fresh copy: a scan during the calls may have moved the counts on.
+        val rec = people.loadId(id)
+        val p = Relationship.parse(text.trim())
+        rec.bio = p.profile
+        // What was chosen by hand stays; the read only fills in what is unknown.
+        val overruled = p.rel?.takeIf { rec.relByHand && it != Relationship.pinned(rec.rel) }
+        if (!rec.relByHand && p.rel != null) rec.rel = p.rel
+        if (!rec.closeByHand && p.close != null) rec.close = p.close
+        people.save(rec)
+        Diag.log("learn: profile written for ${rec.name} (${p.rel}, ${p.close})")
+        learnResult(id, L.t("已学会 ${displayName(rec)}（$total 条）", "Learned ${displayName(rec)} ($total messages)"),
+            listOfNotNull(
+                people.relationLine(rec),
+                overruled?.let { L.t("（档案看像「${L.label(it)}」，没改你设定的）", "(the profile reads as ${L.label(it)}; your choice was kept)") },
+                skipped.takeIf { it > 0 }?.let { L.t("（有 $it 段没整理成，再点「学习」补上）", "($it stretches failed; Learn again to fill them in)") },
+            ) + p.profile.lines().map { it.trim() }.filter { it.isNotEmpty() })
+        // The card on screen was judged without this profile: the next scan sees that and judges again.
+        if (activeId == id) rescanSoon()
+    }
+
     /** What a history read produced goes on that person's card, and only there. */
-    private fun learnResult(title: String, lines: List<String>) {
+    private fun learnResult(id: String, title: String, lines: List<String>, open: Boolean = true) {
         val section = OverlayCard.Section(title, lines)
-        (cardShows as? Verdict)?.takeIf { it.personId == learnId }?.sections?.put(LEARN, section)
-        if (cardFor == learnId) card.setSection(LEARN, section, openCard = activeId == learnId && !unsettled)
+        verdicts[id]?.sections?.put(LEARN, section)
+        if (cardFor == id) card.setSection(LEARN, section, openCard = open && activeId == id && !unsettled)
     }
 
     /** What the chat currently shows, by node tree where it works and by OCR where it does not. */
@@ -1132,8 +1491,8 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
      * silently, and every history read ended after its first screen.
      */
     private fun swipe(x1: Float, y1: Float, x2: Float, y2: Float) {
-        val drag = GestureDescription.StrokeDescription(Path().apply { moveTo(x1, y1); lineTo(x2, y2) }, 0, 600, true)
-        val hold = drag.continueStroke(Path().apply { moveTo(x2, y2); lineTo(x2, y2 + 1) }, 0, 250, false)
+        val drag = GestureDescription.StrokeDescription(Path().apply { moveTo(x1, y1); lineTo(x2, y2) }, 0, 450, true)
+        val hold = drag.continueStroke(Path().apply { moveTo(x2, y2); lineTo(x2, y2 + 1) }, 0, 150, false)
         val ok = dispatchGesture(
             GestureDescription.Builder().addStroke(drag).build(),
             object : GestureResultCallback() {
@@ -1240,17 +1599,61 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
      * an emoji-only name like "🍵" is invisible to OCR, but its pixels are stable across visits,
      * so the chat still gets its own memory. [win] is where the bitmap sits on screen.
      */
-    private fun fingerprint(bmp: Bitmap, win: Chat.Box, bubbles: List<Chat.Bubble>): IntArray {
+    /**
+     * A chat whose name cannot be read (OCR cannot see emoji) is known by the avatar beside their
+     * messages. The title bar, which shows the emoji name, is fingerprinted too and remembered
+     * against that avatar, so a screen with only my own messages on it still finds the same
+     * person instead of minting another; with no such memory it stays "unknown" for now.
+     */
+    private fun unreadableName(): String? {
+        val avatar = lastAvatarHash.takeIf { it.isNotBlank() }?.let { people.resolveFingerprint(targetPkg, it) }
+        val title = lastTitleHash.takeIf { it.isNotBlank() }
+        if (avatar != null) {
+            title?.let { people.rememberTitle(targetPkg, it, avatar) }
+            return avatar
+        }
+        return title?.let { people.titleOwner(targetPkg, it) }
+    }
+
+    /**
+     * The name in the middle of the title bar, cut out as a small picture: for a name OCR cannot
+     * read (emoji), this is how the app shows who it is. Null when nothing stands out there.
+     */
+    private fun namePicture(bmp: Bitmap): Bitmap? = runCatching {
+        val x0 = (bmp.width * 0.18f).toInt()
+        val x1 = (bmp.width * 0.82f).toInt()
+        val y0 = (bmp.height * 0.045f).toInt()
+        val y1 = (bmp.height * 0.105f).toInt()
+        val w = x1 - x0
+        val h = y1 - y0
+        val px = IntArray(w * h)
+        bmp.getPixels(px, 0, w, x0, y0, w, h)
+        val box = Person.nameBox(px, w, h) ?: return@runCatching null
+        val pad = 4
+        val left = (x0 + box[0] - pad).coerceAtLeast(0)
+        val top = (y0 + box[1] - pad).coerceAtLeast(0)
+        val right = (x0 + box[2] + pad).coerceAtMost(bmp.width - 1)
+        val bottom = (y0 + box[3] + pad).coerceAtMost(bmp.height - 1)
+        val cut = Bitmap.createBitmap(bmp, left, top, right - left + 1, bottom - top + 1)
+        if (cut.height <= 64) cut
+        else Bitmap.createScaledBitmap(cut, cut.width * 64 / cut.height, 64, true).also { if (it !== cut) cut.recycle() }
+    }.getOrNull()
+
+    /** Their avatar, from the row of the first message they sent: a photo, so it has real variation. */
+    private fun avatarPrint(bmp: Bitmap, win: Chat.Box, bubbles: List<Chat.Bubble>): IntArray? {
+        val first = bubbles.firstOrNull { it.incoming } ?: return null
+        val w = bmp.width
+        val top = first.box.top - win.top   // screen to bitmap coordinates
+        return blockMeans(bmp, Chat.Box((w * 0.015f).toInt(), top, (w * 0.09f).toInt(), (top + bmp.height * 0.032f).toInt()))
+    }
+
+    /** The middle of the title bar, where the name (or the emoji that is the name) is drawn. */
+    private fun titlePrint(bmp: Bitmap): IntArray =
+        blockMeans(bmp, Chat.Box((bmp.width * 0.3f).toInt(), (bmp.height * 0.035f).toInt(), (bmp.width * 0.7f).toInt(), (bmp.height * 0.075f).toInt()))
+
+    private fun blockMeans(bmp: Bitmap, region: Chat.Box): IntArray {
         val w = bmp.width
         val h = bmp.height
-        // Their avatar, taken from the row of the first message they sent: a photo, so it has
-        // real variation. The title bar is nearly blank and hashed every chat to the same value.
-        val firstIncoming = bubbles.firstOrNull { it.incoming }
-        val region = if (firstIncoming != null) {
-            val top = firstIncoming.box.top - win.top   // screen to bitmap coordinates
-            Chat.Box((w * 0.015f).toInt(), top, (w * 0.09f).toInt(), (top + h * 0.032f).toInt())
-        } else
-            Chat.Box((w * 0.3f).toInt(), (h * 0.035f).toInt(), (w * 0.7f).toInt(), (h * 0.075f).toInt())
 
         // 4x4 grid of BLOCK MEANS, not single pixels. One pixel moves with every anti-aliasing
         // wobble and scroll offset, which is why the same avatar hashed differently on every scan
@@ -1435,7 +1838,15 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     companion object {
         private const val DEBOUNCE_MS = 450L
         private const val MAX_NODES = 3000
-        private const val MAX_LEARN_PAGES = 60
+        /** A safety net, not a limit anyone should meet: the read ends at the first message. */
+        private const val MAX_LEARN_PAGES = 5000
+        /** Pages in a row with nothing new that mean the top of the history (or a long run of pictures). */
+        private const val STALE_PAGES = 5
+        /** From one scroll to the next capture: the gesture, then a moment for the list to settle. */
+        private const val LEARN_STEP_MS = 1000L
+        /** One stretch of history per notes call, and how much the profile call takes at once. */
+        private const val CHUNK_CHARS = 12_000
+        private const val REDUCE_CHARS = 40_000
         /** Screenshots are rate-limited by the platform and cost battery: at most one OCR pass per gap. */
         private const val PROBE_GAP_MS = 3000L
         private const val MAX_VERDICTS = 24

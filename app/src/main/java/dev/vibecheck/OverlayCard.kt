@@ -3,13 +3,19 @@ package dev.vibecheck
 import android.accessibilityservice.AccessibilityService
 import android.content.Context
 import android.content.res.Configuration
+import android.graphics.Bitmap
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.Typeface
+import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.GradientDrawable
 import android.os.Handler
 import android.os.Looper
+import android.text.SpannableString
+import android.text.Spanned
 import android.text.TextUtils
+import android.text.style.ImageSpan
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -57,6 +63,16 @@ class OverlayCard(
         fun onPauseChat()
         fun onUnpause()
         fun onSettings()
+        /** Who the person on the card is to me (Relationship.KEYS, "" = worked out), or null when there is nobody to set it for. */
+        fun relationNow(): String?
+        fun onSetRelation(key: String)
+        /** How close (Relationship.CLOSENESS, "" = not known), or null when there is nobody to set it for. */
+        fun closenessNow(): String?
+        fun onSetCloseness(key: String)
+        /** The name the card shows is wrong or missing (an emoji name OCR cannot read): name them in the app. */
+        fun onRename()
+        /** The picture of the name of the person on the card, when their name cannot be read as text. */
+        fun namePicture(): Bitmap?
     }
 
     /** A titled panel under the judgment: the deep read, reply drafts, a learned profile. */
@@ -87,6 +103,8 @@ class OverlayCard(
     private var open = false
     private var expanded = false
     private var menu = false
+    /** The relationship choices are open under the menu. */
+    private var picking = false
     /** Non-null while a history read drives the chat: the bubble counts, and a tap stops the read. */
     private var learnCount: Int? = null
     /** Taken down for a screen change inside the app, with everything kept for coming back. */
@@ -117,6 +135,8 @@ class OverlayCard(
         badge: String? = null,
         risk: Float = 0f,
         sections: Map<String, Section> = emptyMap(),
+        /** The same card, updated: leave the reader where they were rather than back at the top. */
+        keepScroll: Boolean = false,
     ) {
         this.title = title
         this.blocks = blocks
@@ -130,7 +150,7 @@ class OverlayCard(
         pausedText = null
         if (blocks.isEmpty()) { hide(); return }
         suspended = false
-        render()
+        render(keepScroll)
     }
 
     /** One line of status in place of a judgment: "Thinking…", a missing key, an error. */
@@ -333,6 +353,7 @@ class OverlayCard(
         if (learnCount != null) return
         open = true
         menu = "menu" !in prefs.hiddenButtons
+        picking = false
         renderCard()
         if (blocks.isEmpty() && pausedText == null) actions.onOpened()
     }
@@ -500,14 +521,14 @@ class OverlayCard(
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         addView(TextView(svc).apply {
-            text = title ?: "Jev"
+            text = titleText(title ?: "Jev", 12f * s)
             textSize = 12f * s
             setTextColor(p.header)
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         if ("menu" !in prefs.hiddenButtons && pausedText == null) {
-            addView(iconChip("⋯", L.t("更多操作", "More actions"), p, s) { menu = !menu; renderCard(keepScroll = true) })
+            addView(iconChip("⋯", L.t("更多操作", "More actions"), p, s) { menu = !menu; picking = false; renderCard(keepScroll = true) })
         }
         addView(iconChip("✕", L.t("收起", "Close"), p, s) {
             open = false; expanded = false; menu = false
@@ -515,12 +536,64 @@ class OverlayCard(
         })
     }
 
-    private fun menuRow(p: Palette, s: Float): View = flow(listOf(
-        chip(L.t("重新判断", "Re-check"), p, s) { menu = false; actions.onRescan() },
-        chip(L.t("暂停 1 小时", "Pause 1 h"), p, s) { menu = false; actions.onSnooze() },
-        chip(L.t("这个聊天不再解读", "Pause this chat"), p, s) { menu = false; actions.onPauseChat() },
-        chip(L.t("设置", "Settings"), p, s) { menu = false; actions.onSettings() },
-    )).also { it.setPadding(0, dp(2), 0, dp(6)) }
+    /** The title, with the picture of an unreadable name where [NAME_PICTURE] stands. */
+    private fun titleText(t: String, sp: Float): CharSequence {
+        val at = t.indexOf(NAME_PICTURE)
+        if (at < 0) return t
+        val picture = actions.namePicture()
+            ?: return t.replace(NAME_PICTURE.toString(), L.t("未命名联系人", "Unnamed contact"))
+        val px = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, sp * 1.35f, svc.resources.displayMetrics).toInt()
+        val d = BitmapDrawable(svc.resources, picture).apply { setBounds(0, 0, px * picture.width / picture.height.coerceAtLeast(1), px) }
+        return SpannableString(t).apply { setSpan(ImageSpan(d, ImageSpan.ALIGN_BOTTOM), at, at + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) }
+    }
+
+    private fun menuRow(p: Palette, s: Float): View {
+        val rel = actions.relationNow()
+        val close = actions.closenessNow()
+        val chips = ArrayList<View>()
+        chips.add(chip(L.t("重新判断", "Re-check"), p, s) { menu = false; actions.onRescan() })
+        if (rel != null) {
+            val shown = listOfNotNull(relationName(rel), close?.takeIf { it.isNotEmpty() }?.let { L.label(it) }).joinToString(" · ")
+            chips.add(chip(L.t("关系：", "Relationship: ") + shown + if (picking) " ▴" else " ▾", p, s) {
+                picking = !picking
+                renderCard(keepScroll = true)
+            })
+            chips.add(chip(L.t("改名", "Rename"), p, s) { menu = false; actions.onRename() })
+        }
+        chips.add(chip(L.t("暂停 1 小时", "Pause 1 h"), p, s) { menu = false; actions.onSnooze() })
+        chips.add(chip(L.t("这个聊天不再解读", "Pause this chat"), p, s) { menu = false; actions.onPauseChat() })
+        chips.add(chip(L.t("设置", "Settings"), p, s) { menu = false; actions.onSettings() })
+        val row = LinearLayout(svc).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(2), 0, dp(6))
+            addView(flow(chips))
+        }
+        if (rel != null && picking) {
+            row.addView(line(L.t("Ta 是你的…（选定后每条都按这个判断）", "They are your… (every message is judged as this)"), 11f * s, p.header, dp(2)).apply {
+                setPadding(0, dp(6), 0, 0)
+            })
+            row.addView(flow((listOf("") + Relationship.KEYS).map { key ->
+                chip((if (key == rel) "✓ " else "") + relationName(key), p, s) {
+                    picking = false
+                    menu = false
+                    actions.onSetRelation(key)
+                }
+            }))
+            // How close is its own question: close friends are not a couple.
+            row.addView(line(L.t("有多亲近…", "How close…"), 11f * s, p.header, dp(2)).apply { setPadding(0, dp(6), 0, 0) })
+            row.addView(flow((listOf("") + Relationship.CLOSENESS).map { key ->
+                chip((if (key == (close ?: "")) "✓ " else "") + (if (key.isEmpty()) L.t("不确定", "not sure") else L.label(key)), p, s) {
+                    picking = false
+                    menu = false
+                    actions.onSetCloseness(key)
+                }
+            }))
+        }
+        return row
+    }
+
+    private fun relationName(key: String): String =
+        if (key.isEmpty()) L.t("自动判断", "work it out") else L.label(key)
 
     /** The buttons at the bottom. Think, Reply and Learn can be switched off in the Tools tab. */
     private fun toolbar(p: Palette, s: Float): View {
@@ -678,16 +751,19 @@ class OverlayCard(
     private fun palette(): Palette =
         if ((svc.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES) DARK else LIGHT
 
-    private companion object {
-        fun c(argb: Long) = argb.toInt()
+    companion object {
+        /** Stands in the title for the picture of a name that cannot be read as text. */
+        const val NAME_PICTURE = '\uFFFC'
 
-        val LIGHT = Palette(
+        private fun c(argb: Long) = argb.toInt()
+
+        private val LIGHT = Palette(
             card = c(0xFFF0F0F0), stroke = c(0xFFE0E0E0), header = c(0xFF8A8A8A), title = c(0xFF4F4F4F), body = c(0xFF6E6E6E),
             chip = c(0xFFE0E0E0), chipText = c(0xFF3C3C3C), pick = c(0xFFFFFFFF), accent = c(0xFF2E7D32),
             idle = c(0xFFE8E8E8), calm = c(0xFFDBE7DB), warn = c(0xFFF3E2BE), alarm = c(0xFFF1C7C2), ring = c(0xFFC8C8C8),
             bubbleText = c(0xFF3C3C3C),
         )
-        val DARK = Palette(
+        private val DARK = Palette(
             card = c(0xFF262626), stroke = c(0xFF3A3A3A), header = c(0xFF9E9E9E), title = c(0xFFE8E8E8), body = c(0xFFC4C4C4),
             chip = c(0xFF3A3A3A), chipText = c(0xFFEEEEEE), pick = c(0xFF333333), accent = c(0xFF81C784),
             idle = c(0xFF3A3A3A), calm = c(0xFF2E4632), warn = c(0xFF574821), alarm = c(0xFF5C2B27), ring = c(0xFF5A5A5A),
