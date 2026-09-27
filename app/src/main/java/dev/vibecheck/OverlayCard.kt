@@ -117,6 +117,9 @@ class OverlayCard(
 
     private val clearNote = Runnable { note = null; if (open && cardRoot != null) renderCard(keepScroll = true) }
 
+    /** The card itself is up (not just the bubble). */
+    fun isOpen(): Boolean = open && cardRoot != null
+
     /** What occludes the chat, to be cut out of a full-screen capture. */
     fun bounds(): Chat.Box? = shown
 

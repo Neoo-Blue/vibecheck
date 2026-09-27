@@ -160,11 +160,21 @@ retried with backoff; a rejected key is not retried until you change the key.
 ⋯ → Pause this chat stops judging *and* recording for one person until you resume it from the
 card or from Tools → People. The bubble shows ⏸ while paused.
 
-**On WeChat the deep pass also takes a screenshot** and uses a vision model (default
-`deepseek/deepseek-v4-flash-vision-exp`), because OCR cannot read stickers and emoji and those
-carry most of the emotion in Chinese chat. Apps that expose their view tree give complete text,
-so the deep pass there is text-only (default `deepseek/deepseek-v4-pro`). Both model names are
-editable in settings.
+**Two models, set under Tools → Models.**
+- **Think and Learn** (default `deepseek/deepseek-v4-pro`) thinks a little before it writes.
+- **Reply and screenshot** (default `deepseek/deepseek-v4.1-flash`) writes reply drafts without
+  thinking first, and reads the screenshot that chats read by OCR send along (WeChat, Telegram:
+  OCR cannot see stickers and emoji, and those carry most of the emotion in Chinese chat).
+
+Answers are streamed, so the read and the first draft show while the rest is written. Every call
+goes to the fastest provider OpenRouter has for the model (a slug with `:nitro`, `:floor` and
+the like is left to route as it says). Each model has a Test button that says how long it took.
+
+**Adult replies (18+)** are off unless switched on under Setup → Behaviour. When on, drafts can be
+as suggestive or explicit as the chat already is, when they are talking about sex or clearly
+enjoying a flirt, or with a partner you talk like this with. They follow the other person's
+lead, never go further than they have shown they want, and stop at a no, a hesitation, a change
+of subject, or any sign they may be under 18.
 
 ## It keeps learning even with the card off
 
