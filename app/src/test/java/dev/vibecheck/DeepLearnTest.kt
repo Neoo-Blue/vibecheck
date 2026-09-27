@@ -190,3 +190,49 @@ class EmojiNameTest {
         assertFalse(Person.isTyping(listOf("欧欧" to Chat.Box(0, 0, 10, 10))))
     }
 }
+
+class EmojiLabelTest {
+
+    @Test fun notificationsGiveTheNameAsWritten() {
+        assertEquals("🐟" to "今天去哪", Person.fromNotification("🐟", "[2条]今天去哪"))
+        assertEquals("欧欧🌸" to "在吗", Person.fromNotification("欧欧🌸", "欧欧🌸: 在吗"))
+        assertEquals("爬山群" to "张三: 几点集合", Person.fromNotification("爬山群", "张三: 几点集合"))
+        assertNull(Person.fromNotification("微信", "你收到了 3 条消息"))
+        assertNull(Person.fromNotification("WeChat", "在吗"))
+        assertNull(Person.fromNotification("🐟", "[3条]"))
+        assertEquals("欧欧🌸" to "在吗", Person.fromNotification("欧欧🌸 (3条新消息)", "在吗"))
+    }
+
+    @Test fun anEmojiNameComesBackFromItsNotification() {
+        val heard = listOf("小李" to "吃了吗", "欧欧🌸" to "在吗", "🐟" to "今天去哪玩")
+        // OCR read the letters and dropped the emoji: the letters match.
+        assertEquals("欧欧🌸", Person.nameFromNotifications("欧欧", listOf("随便"), heard))
+        // Nothing readable at all: their message on screen says whose chat this is.
+        assertEquals("🐟", Person.nameFromNotifications(null, listOf("今天去哪玩"), heard))
+        assertNull(Person.nameFromNotifications(null, listOf("好的"), heard))
+        // A name without emoji is read by OCR already: never a match for an unreadable chat.
+        assertNull(Person.nameFromNotifications(null, listOf("吃了吗"), heard))
+        assertNull(Person.nameFromNotifications("小王", listOf("在吗"), heard))
+    }
+
+    @Test fun emojiIsFoundAndTakenOut() {
+        assertTrue(Person.hasPictograph("欧欧🌸"))
+        assertTrue(Person.hasPictograph("❤️"))
+        assertFalse(Person.hasPictograph("欧欧"))
+        assertEquals("欧欧", Person.stripEmoji("欧欧🌸"))
+        assertEquals("", Person.stripEmoji("👨‍👩‍👧❤️"))
+        assertEquals("小鱼", Person.stripEmoji("✨小鱼✨"))
+    }
+
+    @Test fun theNameIsFoundInTheTitleBar() {
+        val w = 60
+        val h = 20
+        val bg = 0xFFEDEDED.toInt()
+        val px = IntArray(w * h) { bg }
+        for (y in 6..13) for (x in 25..36) px[y * w + x] = 0xFFE5A000.toInt()   // an emoji-sized blob
+        assertArrayEquals(intArrayOf(25, 6, 36, 13), Person.nameBox(px, w, h))
+        assertNull("a blank bar has no name", Person.nameBox(IntArray(w * h) { bg }, w, h))
+        val speck = IntArray(w * h) { bg }.also { it[10 * w + 30] = 0xFF000000.toInt() }
+        assertNull("a speck is not a name", Person.nameBox(speck, w, h))
+    }
+}

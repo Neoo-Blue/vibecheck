@@ -1,6 +1,8 @@
 package dev.vibecheck
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import org.json.JSONObject
 import java.io.File
 
@@ -13,6 +15,9 @@ class PersonStore(ctx: Context) {
     private val sp = ctx.getSharedPreferences("people", Context.MODE_PRIVATE)
     /** Kept histories (Archive), one file per chat, in app-private storage. */
     private val dir = File(ctx.filesDir, "archive")
+    /** Pictures of names OCR cannot read (emoji), cut from the chat's title bar. */
+    private val pictureDir = File(ctx.filesDir, "names")
+    private val pictures = HashMap<String, Bitmap>()
 
     class Record(
         val id: String,
@@ -184,11 +189,37 @@ class PersonStore(ctx: Context) {
 
     fun setAlias(id: String, alias: String) = sp.edit().putString("${canonical(id)}:alias", alias.trim().take(24)).apply()
 
-    /** What to call them: your name for them, else the chat title; an unreadable one says so. */
+    /**
+     * What to call them in words: your name for them (or the one their notifications gave), else
+     * the chat title. A name that could not be read is never shown as its internal code.
+     */
     fun shownName(id: String): String {
         aliasOf(id).takeIf { it.isNotBlank() }?.let { return it }
         val n = nameOf(canonical(id))
-        return if (Person.isFingerprint(n)) L.t("未命名联系人 ", "Unnamed contact ") + n.take(5) else n
+        return if (Person.isFingerprint(n)) L.t("未命名联系人", "Unnamed contact") else n
+    }
+
+    private fun pictureFile(id: String) = File(pictureDir, Archive.hash(canonical(id)) + ".png")
+
+    /** The picture of an unreadable name, or null. Only for people with no name in words. */
+    fun namePicture(id: String): Bitmap? {
+        val c = canonical(id)
+        if (aliasOf(c).isNotBlank() || !Person.isFingerprint(nameOf(c))) return null
+        pictures[c]?.let { return it }
+        val f = pictureFile(c)
+        if (!f.exists()) return null
+        return runCatching { BitmapFactory.decodeFile(f.path) }.getOrNull()?.also { pictures[c] = it }
+    }
+
+    fun hasNamePicture(id: String): Boolean = pictures.containsKey(canonical(id)) || pictureFile(id).exists()
+
+    fun saveNamePicture(id: String, picture: Bitmap) {
+        val c = canonical(id)
+        runCatching {
+            pictureDir.mkdirs()
+            pictureFile(c).outputStream().use { picture.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        }
+        pictures[c] = picture
     }
 
     /**
@@ -226,6 +257,8 @@ class PersonStore(ctx: Context) {
 
     fun forget(id: String, keepArchive: Boolean = false) {
         if (!keepArchive) deleteArchive(id)
+        runCatching { pictureFile(id).delete() }
+        pictures.remove(id)
         val e = sp.edit()
             .remove("$id:name").remove("$id:note").remove("$id:style")
             .remove("$id:learn").remove("$id:hist").remove("$id:stats").remove("$id:seen")
@@ -239,6 +272,8 @@ class PersonStore(ctx: Context) {
 
     fun forgetAll() {
         runCatching { dir.deleteRecursively() }
+        runCatching { pictureDir.deleteRecursively() }
+        pictures.clear()
         sp.edit().clear().apply()
     }
 
@@ -397,7 +432,7 @@ class PersonStore(ctx: Context) {
                 r.bio.takeIf { it.isNotBlank() }?.let { L.t("学到（${r.learned} 条）：${it.take(80)}", "learned (${r.learned} msgs): ${it.take(80)}") },
                 L.t("已暂停", "paused").takeIf { r.muted },
             )
-            "${r.name}（${r.apps.joinToString(" · ") { Apps.label(it) }}）\n  " +
+            "${shownName(id)}（${r.apps.joinToString(" · ") { Apps.label(it) }}）\n  " +
                 (if (bits.isEmpty()) L.t("刚认识，还没积累", "just met, nothing learned yet") else bits.joinToString("\n  "))
         }
     }

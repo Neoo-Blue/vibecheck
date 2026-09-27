@@ -8,6 +8,7 @@ import android.content.ClipboardManager
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.res.Configuration
+import android.app.Notification
 import android.graphics.Bitmap
 import android.graphics.Path
 import android.graphics.Rect
@@ -108,6 +109,8 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     private var lastTitleHash = ""
     /** The name the last conversation was read under, for the moments a typing indicator hides it. */
     private var lastPeerName: String? = null
+    /** The title bar's name cut out as a picture, from the last OCR pass that could not read it. */
+    private var lastNamePicture: Bitmap? = null
     private var viaOcr = false
     private var onHomeScreen = false
     private var hasInput = false
@@ -176,7 +179,12 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         prefs.listen(prefListener)
         // No packageNames filter: with one, no event ever arrives from another app, so the card
         // never learns the chat is gone and stays pinned over whatever you open next.
-        serviceInfo = serviceInfo.apply { packageNames = null }
+        // Notifications too: they spell out the names OCR cannot read (emoji). Set here as well as
+        // in the XML, so an update does not wait for the service to be switched off and on.
+        serviceInfo = serviceInfo.apply {
+            packageNames = null
+            eventTypes = eventTypes or AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED
+        }
         Diag.connected = true
         Diag.log("connected, watching ${prefs.packages}")
         syncDebugRoutes()
@@ -210,6 +218,10 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         val pkg = event?.packageName?.toString() ?: return
+        if (event.eventType == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED) {
+            if (pkg in watched) hear(pkg, event)
+            return
+        }
         val stateChange = event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
         // Showing the card is itself a window change: reacting to our own events hid the card
         // a moment after drawing it, which looked like a flash. Our settings screen coming up
@@ -250,6 +262,36 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     }
 
     private val foreignCheck = Runnable { if (!chatOnScreen()) leaveChat("left the chat") }
+
+    /** Recent message notifications from watched apps: package, sender as the app writes it, message. In memory only. */
+    private val heard = ArrayDeque<Triple<String, String, String>>()
+
+    private fun hear(pkg: String, event: AccessibilityEvent) {
+        val extras = (event.parcelableData as? Notification)?.extras ?: return
+        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: return
+        val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: return
+        val (name, msg) = Person.fromNotification(title, text) ?: return
+        heard.addLast(Triple(pkg, name, msg))
+        while (heard.size > 40) heard.removeFirst()
+    }
+
+    /**
+     * A name OCR could not read in full gets its real one, emoji and all, from their
+     * notifications: "欧欧" becomes "欧欧🌸", an unnamed emoji-only chat becomes "🐟". Kept as the
+     * name you would give them, so it shows everywhere; never over one you gave yourself.
+     */
+    private fun nameFromNotifications(record: PersonStore.Record, bubbles: List<Chat.Bubble>) {
+        if (!viaOcr || record.alias.isNotBlank() || record.name == UNKNOWN || heard.isEmpty()) return
+        val read = record.name.takeUnless { Person.isFingerprint(it) }
+        val full = Person.nameFromNotifications(
+            read,
+            bubbles.filter { it.incoming }.takeLast(8).map { it.text },
+            heard.filter { it.first == targetPkg }.map { it.second to it.third },
+        ) ?: return
+        people.setAlias(record.id, full)
+        record.alias = full
+        Diag.log("named ${record.name} \"$full\" from a notification")
+    }
 
     /**
      * Is a watched app still what the user is looking at? The top window by layer decides, not
@@ -352,6 +394,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         // after whichever chat was captured last.
         lastAvatarHash = ""
         lastTitleHash = ""
+        lastNamePicture = null
         handle(bubbles)
     }
 
@@ -400,12 +443,15 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                 val (found, titles) = Chat.fromOcr(placed, win, exclude)
                 val avatar = avatarPrint(shot.bmp, win, found)?.let { Person.hashOf(it) }.orEmpty()
                 val title = Person.hashOf(titlePrint(shot.bmp))
+                // No name to read in the title bar: keep a picture of it (the emoji the name is made of).
+                val picture = if (titles.none { Person.looksLikeName(it.first) } && !Person.isTyping(titles)) namePicture(shot.bmp) else null
                 shot.bmp.recycle()
                 if (gen != screenGen) { rescanSoon(); return@read }   // the screen changed under the capture
                 onHomeScreen = Chat.looksLikeHomeScreen(placed, win)
                 hasInput = false
                 lastAvatarHash = avatar
                 lastTitleHash = title
+                lastNamePicture = picture
                 lastWindow = win
                 lastTitles = titles
                 lastDescs = emptyList()
@@ -506,6 +552,10 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         lastPeerName = name
         val record = people.load(targetPkg, name)
         val id = record.id
+        // Someone known only by a fingerprint: the picture of their name is how they are shown.
+        if (Person.isFingerprint(record.name) && record.alias.isBlank() && !people.hasNamePicture(id))
+            lastNamePicture?.let { people.saveNamePicture(id, it) }
+        nameFromNotifications(record, bubbles)
         val entering = activeId != id
         activeId = id
         currentRecord = record
@@ -529,7 +579,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         // willing to spend an API call: the messages are already on screen, reading them is free.
         // An unreadable name shares one record between people, so nothing is learned into it.
         if (prefs.passive && name != UNKNOWN) observePassively(record, bubbles, entering)
-        Diag.person = "${record.name} (${record.stats.theirMsgs + record.stats.myMsgs} seen, ${record.model.updates} updates)"
+        Diag.person = "${displayName(record)} (${record.stats.theirMsgs + record.stats.myMsgs} seen, ${record.model.updates} updates)"
 
         // Judging costs money and there is nowhere to show it, so stop here when judging is off.
         if (!prefs.enabled) { card.hide(); return }
@@ -770,9 +820,12 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         }
     }
 
-    /** "欧欧 · 朋友 · 很铁": who, what kind of chat, how close. A misread contact shows at a glance. */
+    /**
+     * "欧欧 · 朋友 · 很铁": who, what kind of chat, how close. A misread contact shows at a glance.
+     * Someone whose name is only a picture (emoji OCR cannot read) gets the picture there.
+     */
     private fun cardTitle(r: PersonStore.Record, situation: String?): String = listOfNotNull(
-        displayName(r),
+        if (people.namePicture(r.id) != null) OverlayCard.NAME_PICTURE.toString() else displayName(r),
         situation?.takeIf { it.isNotBlank() }?.let { L.label(it) },
         Relationship.closeness(r.close)?.let { L.label(it) },
     ).joinToString(" · ")
@@ -960,6 +1013,8 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         card.flash(if (key.isEmpty()) L.t("关系：自动判断", "Relationship: worked out automatically") else L.t("关系已设为：", "Relationship set: ") + L.label(key))
         rescanSoon()
     }
+
+    override fun namePicture(): Bitmap? = currentRecord?.takeIf { it.id == activeId }?.let { people.namePicture(it.id) }
 
     override fun closenessNow(): String? =
         currentRecord?.takeIf { it.id == activeId && it.name != UNKNOWN }?.let { people.closenessOf(it.id) }
@@ -1551,6 +1606,30 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         }
         return title?.let { people.titleOwner(targetPkg, it) }
     }
+
+    /**
+     * The name in the middle of the title bar, cut out as a small picture: for a name OCR cannot
+     * read (emoji), this is how the app shows who it is. Null when nothing stands out there.
+     */
+    private fun namePicture(bmp: Bitmap): Bitmap? = runCatching {
+        val x0 = (bmp.width * 0.18f).toInt()
+        val x1 = (bmp.width * 0.82f).toInt()
+        val y0 = (bmp.height * 0.045f).toInt()
+        val y1 = (bmp.height * 0.105f).toInt()
+        val w = x1 - x0
+        val h = y1 - y0
+        val px = IntArray(w * h)
+        bmp.getPixels(px, 0, w, x0, y0, w, h)
+        val box = Person.nameBox(px, w, h) ?: return@runCatching null
+        val pad = 4
+        val left = (x0 + box[0] - pad).coerceAtLeast(0)
+        val top = (y0 + box[1] - pad).coerceAtLeast(0)
+        val right = (x0 + box[2] + pad).coerceAtMost(bmp.width - 1)
+        val bottom = (y0 + box[3] + pad).coerceAtMost(bmp.height - 1)
+        val cut = Bitmap.createBitmap(bmp, left, top, right - left + 1, bottom - top + 1)
+        if (cut.height <= 64) cut
+        else Bitmap.createScaledBitmap(cut, cut.width * 64 / cut.height, 64, true).also { if (it !== cut) cut.recycle() }
+    }.getOrNull()
 
     /** Their avatar, from the row of the first message they sent: a photo, so it has real variation. */
     private fun avatarPrint(bmp: Bitmap, win: Chat.Box, bubbles: List<Chat.Bubble>): IntArray? {

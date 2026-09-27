@@ -3,13 +3,19 @@ package dev.vibecheck
 import android.accessibilityservice.AccessibilityService
 import android.content.Context
 import android.content.res.Configuration
+import android.graphics.Bitmap
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.Typeface
+import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.GradientDrawable
 import android.os.Handler
 import android.os.Looper
+import android.text.SpannableString
+import android.text.Spanned
 import android.text.TextUtils
+import android.text.style.ImageSpan
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -65,6 +71,8 @@ class OverlayCard(
         fun onSetCloseness(key: String)
         /** The name the card shows is wrong or missing (an emoji name OCR cannot read): name them in the app. */
         fun onRename()
+        /** The picture of the name of the person on the card, when their name cannot be read as text. */
+        fun namePicture(): Bitmap?
     }
 
     /** A titled panel under the judgment: the deep read, reply drafts, a learned profile. */
@@ -513,7 +521,7 @@ class OverlayCard(
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         addView(TextView(svc).apply {
-            text = title ?: "Jev"
+            text = titleText(title ?: "Jev", 12f * s)
             textSize = 12f * s
             setTextColor(p.header)
             maxLines = 1
@@ -526,6 +534,17 @@ class OverlayCard(
             open = false; expanded = false; menu = false
             renderBubble()
         })
+    }
+
+    /** The title, with the picture of an unreadable name where [NAME_PICTURE] stands. */
+    private fun titleText(t: String, sp: Float): CharSequence {
+        val at = t.indexOf(NAME_PICTURE)
+        if (at < 0) return t
+        val picture = actions.namePicture()
+            ?: return t.replace(NAME_PICTURE.toString(), L.t("未命名联系人", "Unnamed contact"))
+        val px = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, sp * 1.35f, svc.resources.displayMetrics).toInt()
+        val d = BitmapDrawable(svc.resources, picture).apply { setBounds(0, 0, px * picture.width / picture.height.coerceAtLeast(1), px) }
+        return SpannableString(t).apply { setSpan(ImageSpan(d, ImageSpan.ALIGN_BOTTOM), at, at + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) }
     }
 
     private fun menuRow(p: Palette, s: Float): View {
@@ -732,16 +751,19 @@ class OverlayCard(
     private fun palette(): Palette =
         if ((svc.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES) DARK else LIGHT
 
-    private companion object {
-        fun c(argb: Long) = argb.toInt()
+    companion object {
+        /** Stands in the title for the picture of a name that cannot be read as text. */
+        const val NAME_PICTURE = '\uFFFC'
 
-        val LIGHT = Palette(
+        private fun c(argb: Long) = argb.toInt()
+
+        private val LIGHT = Palette(
             card = c(0xFFF0F0F0), stroke = c(0xFFE0E0E0), header = c(0xFF8A8A8A), title = c(0xFF4F4F4F), body = c(0xFF6E6E6E),
             chip = c(0xFFE0E0E0), chipText = c(0xFF3C3C3C), pick = c(0xFFFFFFFF), accent = c(0xFF2E7D32),
             idle = c(0xFFE8E8E8), calm = c(0xFFDBE7DB), warn = c(0xFFF3E2BE), alarm = c(0xFFF1C7C2), ring = c(0xFFC8C8C8),
             bubbleText = c(0xFF3C3C3C),
         )
-        val DARK = Palette(
+        private val DARK = Palette(
             card = c(0xFF262626), stroke = c(0xFF3A3A3A), header = c(0xFF9E9E9E), title = c(0xFFE8E8E8), body = c(0xFFC4C4C4),
             chip = c(0xFF3A3A3A), chipText = c(0xFFEEEEEE), pick = c(0xFF333333), accent = c(0xFF81C784),
             idle = c(0xFF3A3A3A), calm = c(0xFF2E4632), warn = c(0xFF574821), alarm = c(0xFF5C2B27), ring = c(0xFF5A5A5A),

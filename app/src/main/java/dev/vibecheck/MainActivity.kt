@@ -8,6 +8,7 @@ import android.content.ComponentName
 import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Typeface
+import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
@@ -18,7 +19,11 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.text.Editable
 import android.text.InputType
+import android.text.SpannableStringBuilder
+import android.text.Spanned
 import android.text.TextWatcher
+import android.text.style.ImageSpan
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -506,12 +511,12 @@ class MainActivity : Activity() {
         val list = ListView(this)
         box.addView(list, LinearLayout.LayoutParams(MATCH_PARENT, (resources.displayMetrics.heightPixels * 0.5f).toInt()))
         var shown = all
-        fun label(e: PersonStore.Entry) = buildString {
-            append(e.name).append("  ·  ").append(e.apps.joinToString("+") { Apps.label(it) })
+        fun label(e: PersonStore.Entry): CharSequence = SpannableStringBuilder(nameLabel(e.id, 16f)).apply {
+            append("  ·  ").append(e.apps.joinToString("+") { Apps.label(it) })
             append("  ·  ").append(L.t("${e.messages} 条", "${e.messages} msgs"))
             if (e.muted) append(L.t("  ·  已暂停", "  ·  paused"))
         }
-        fun fill() { list.adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, shown.map { label(it) }) }
+        fun fill() { list.adapter = ArrayAdapter<CharSequence>(this, android.R.layout.simple_list_item_1, shown.map { label(it) }) }
         fill()
         val dialog = AlertDialog.Builder(this)
             .setTitle(L.t("人物记忆（${all.size}）", "People (${all.size})"))
@@ -541,13 +546,20 @@ class MainActivity : Activity() {
         if (r.muted) box.addView(text(L.t("已暂停：不解读，也不记录。", "Paused: not judged, nothing recorded."), 13f, warn()))
         // A name for chats whose own cannot be read: OCR does not see emoji.
         box.addView(text(L.t("名字", "Name"), 13f, fg()).apply { setPadding(0, dp(8), 0, 0) })
+        people.namePicture(id)?.let {
+            box.addView(text("", 13f, sub()).apply {
+                text = SpannableStringBuilder(L.t("聊天标题上是：", "The chat title shows: ")).append(nameLabel(id, 18f))
+            })
+        }
         val alias = EditText(this).apply {
             setText(r.alias)
             isSingleLine = true
-            hint = if (Person.isFingerprint(r.name)) L.t("名字是 emoji 认不出来，给 Ta 起一个", "Their name is emoji the app can't read: give them one")
+            hint = if (Person.isFingerprint(r.name)) L.t("输入或粘贴 Ta 的名字，emoji 也行", "Type or paste their name, emoji and all")
                 else L.t("聊天标题上的名字：", "Name in the chat title: ") + r.name
         }
         box.addView(alias)
+        if (Person.isFingerprint(r.name) && r.alias.isBlank())
+            box.addView(hint(L.t("Ta 给你发消息、通知里带着名字时，会自动认出这个名字。", "Their name is picked up by itself from their next message notification.")))
         box.addView(text(people.describe(id), 13f, sub()).apply { setTextIsSelectable(true); setPadding(0, dp(8), 0, 0) })
         box.addView(text(L.t("Ta 是你的…", "They are your…"), 13f, fg()).apply { setPadding(0, dp(12), 0, 0) })
         lateinit var relPill: TextView
@@ -565,7 +577,7 @@ class MainActivity : Activity() {
         val note = EditText(this).apply { setText(r.note); minLines = 2; hint = L.t("例：大学室友，说话很直", "e.g. college roommate, very blunt") }
         box.addView(note)
         val dialog = AlertDialog.Builder(this)
-            .setTitle("${people.shownName(id)}（${r.apps.joinToString(" · ") { Apps.label(it) }}）")
+            .setTitle(SpannableStringBuilder(nameLabel(id, 20f)).append("（${r.apps.joinToString(" · ") { Apps.label(it) }}）"))
             .setView(ScrollView(this).apply { addView(box) })
             .setPositiveButton(L.t("保存", "Save")) { _, _ ->
                 val fresh = people.loadId(id)
@@ -600,6 +612,17 @@ class MainActivity : Activity() {
             }
             .setNegativeButton(L.t("取消", "Cancel"), null)
             .show()
+    }
+
+    /**
+     * A person's name for a label: in words, or, for a name the app could only see (emoji OCR
+     * cannot read), the picture of it from the chat's title bar. Never an internal code.
+     */
+    private fun nameLabel(id: String, sp: Float): CharSequence {
+        val picture = people.namePicture(id) ?: return people.shownName(id)
+        val px = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, sp * 1.3f, resources.displayMetrics).toInt()
+        val d = BitmapDrawable(resources, picture).apply { setBounds(0, 0, px * picture.width / picture.height.coerceAtLeast(1), px) }
+        return SpannableStringBuilder("\uFFFC").apply { setSpan(ImageSpan(d, ImageSpan.ALIGN_BOTTOM), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) }
     }
 
     private fun relationChoice(key: String): String =
@@ -657,7 +680,7 @@ class MainActivity : Activity() {
     private fun merge(from: String) {
         val others = people.entries().filter { it.id != from }
         if (others.isEmpty()) { toast(L.t("只认识这一个人", "Only one person known")); return }
-        val labels = others.map { "${it.name}（${it.apps.joinToString(" · ") { a -> Apps.label(a) }}）" }
+        val labels: List<CharSequence> = others.map { SpannableStringBuilder(nameLabel(it.id, 16f)).append("（${it.apps.joinToString(" · ") { a -> Apps.label(a) }}）") }
         AlertDialog.Builder(this)
             .setTitle(L.t("把「${people.nameOf(from)}」合并进谁？", "Merge ${people.nameOf(from)} into whom?"))
             .setItems(labels.toTypedArray()) { _, i ->

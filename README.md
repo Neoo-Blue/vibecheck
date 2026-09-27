@@ -195,10 +195,16 @@ Switch this off under Setup → "Remember people while you chat"; a paused chat 
 
 The app reads the contact's name from the chat title bar (falling back to the avatar's
 content description on WeChat) and stores everything under "app package + name". Emoji in names
-are fine where the app gives text; OCR (WeChat, Telegram) cannot see emoji at all, so a chat
-whose name is only emoji is known by the avatar beside their messages, and the title bar is
-remembered against it for screens where only your own messages show. Give such a contact a name
-with ⋯ → Rename on the card. A "typing…" indicator in place of the name is not taken for one.
+are fine where the app gives text. OCR (WeChat, Telegram) cannot see emoji at all:
+- A chat whose name is only emoji is known by the avatar beside their messages, and the title
+  bar is remembered against it for screens where only your own messages show.
+- Such a person is shown with the emoji itself: a small picture of the name cut from the chat's
+  title bar, on the card and in Tools → People, never an internal code.
+- Their real name, emoji and all, is picked up from their message notifications: once a
+  notification's message is on screen in that chat, its sender's name becomes theirs. The same
+  puts the emoji back on names OCR read only in part ("欧欧" becomes "欧欧🌸").
+- ⋯ → Rename on the card names anyone by hand (type or paste emoji); your name always wins.
+- A "typing…" indicator in place of the name is not taken for one.
 
 | stored | from | used as |
 |---|---|---|
@@ -339,6 +345,9 @@ with what is actually on screen.
   app from battery optimisation (Tools → Keep it running).
 
 ## Privacy
+
+Notifications from the watched apps are read only for the sender's name and message, kept in
+memory (the last 40) to name emoji-only contacts, and never stored or sent anywhere.
 
 Chat text goes to `api.typesafe.ai` for judging (or to `openrouter.ai` if you chose that
 engine) and, when you press the buttons, to `openrouter.ai`. **Learning a person sends their

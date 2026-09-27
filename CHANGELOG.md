@@ -32,9 +32,15 @@ before this version are read for both from their first line, so there is no need
   relationship". Now nothing is assumed.
 
 **Emoji names.** Names like ❤️, 🧑🏻‍💻 or ✨小鱼✨ are recognised where the app gives text. Where it
-has to use OCR (WeChat, Telegram), emoji cannot be read at all: such a chat is known by the
-avatar beside their messages, the title bar is remembered against it for screens that show only
-your own messages, and ⋯ → Rename gives them a name. "对方正在输入…" is no longer taken for a name.
+has to use OCR (WeChat, Telegram), emoji cannot be read at all, so:
+- such a chat is known by the avatar beside their messages, and the title bar is remembered
+  against it for screens that show only your own messages;
+- it is labelled with the emoji itself, a small picture of the name from the chat's title bar,
+  on the card and in People, never with an internal code;
+- the real name, emoji and all, comes from their message notifications, which also puts the
+  emoji back on names OCR read only in part ("欧欧" → "欧欧🌸");
+- ⋯ → Rename names anyone by hand, emoji included;
+- "对方正在输入…" is no longer taken for a name.
 
 Also:
 - After learning, the card is judged again, on the same messages, with what was learned, and the
@@ -48,10 +54,11 @@ Also:
   describe one person there: it applies to everyone without their own.
 
 **Privacy:** learning a person sends your whole history with them to your OpenRouter model to
-write the profile. Kept histories stay in app-private storage and are not in Backup exports;
+write the profile. Notifications from watched apps are now read for the sender's name only
+(kept in memory, never stored or sent). Kept histories stay in app-private storage and are not in Backup exports;
 Tools → People → More… deletes one.
 
-中文：「学习此人」现在会翻完你们的全部聊天记录（不再限 60 页，翻得更快，大约一秒一页），存在手机上，之后边聊边补；再学习只读新增的部分。档案按全部记录分批写成，详细得多：Ta 是你的什么人、有多亲近、Ta 是谁、相处方式、Ta 和你各自怎么说话（附原话）、喜好、常聊的事、梗、重要的事、雷区、Ta 难过时怎么办。回复草稿会带上完整档案和最多 8 段你以前对 Ta 的真实回复，写得像你本人而不是模板。关系和亲近程度分开：关系好不等于是恋人；知道关系后直接告诉 Jev，不再让它猜，不会再把好朋友判成恋爱。「恋爱或亲密关系」改名「恋人或伴侣」，没有背景时不再默认是亲密关系。名字是 emoji 的联系人：能读到文字的应用直接认；截图识字的（微信、Telegram）按头像认，⋯ → 改名可以起名字；「对方正在输入…」不再被当成名字。学习后停在旧记录页时不再拿旧消息去判断。注意：学习会把和这个人的全部聊天记录发给你的 OpenRouter 模型。
+中文：「学习此人」现在会翻完你们的全部聊天记录（不再限 60 页，翻得更快，大约一秒一页），存在手机上，之后边聊边补；再学习只读新增的部分。档案按全部记录分批写成，详细得多：Ta 是你的什么人、有多亲近、Ta 是谁、相处方式、Ta 和你各自怎么说话（附原话）、喜好、常聊的事、梗、重要的事、雷区、Ta 难过时怎么办。回复草稿会带上完整档案和最多 8 段你以前对 Ta 的真实回复，写得像你本人而不是模板。关系和亲近程度分开：关系好不等于是恋人；知道关系后直接告诉 Jev，不再让它猜，不会再把好朋友判成恋爱。「恋爱或亲密关系」改名「恋人或伴侣」，没有背景时不再默认是亲密关系。名字是 emoji 的联系人：能读到文字的应用直接认；截图识字的（微信、Telegram）按头像认，并用标题栏上那个 emoji 的小图来标，不再显示代码；Ta 发来消息后，从通知里自动拿到带 emoji 的真名（「欧欧」也会补成「欧欧🌸」）；⋯ → 改名可以手动起名；「对方正在输入…」不再被当成名字。学习后停在旧记录页时不再拿旧消息去判断。注意：学习会把和这个人的全部聊天记录发给你的 OpenRouter 模型。
 
 ## 6.6.0
 
