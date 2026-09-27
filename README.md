@@ -390,11 +390,16 @@ with what is actually on screen.
   use. Phones without Play services (many phones sold in China) cannot run the OCR path; the error
   shows under Tools → Diagnostics. On Android 14+ the capture is of the chat's own window, so an
   open card or the keyboard never hides messages from OCR.
-- Soul has no documented view structure; classification is the same geometry rule (hugging
-  the left = them, hugging the right = me) and may need adjusting on a new version. The same
-  goes for the other apps; the status labels they print inside the list (Seen, Delivered,
-  SMS · Now, Active now, call stubs, reactions) are filtered by known patterns and anything
-  new will leak into the context.
+- Whose message is whose comes from where it sits: hugging the left is them, hugging the right
+  is me. A long message that nearly fills the width sits the same either way (WeChat's widest
+  bubbles leave equal margins), so for those the avatar or bubble drawn beside the text decides:
+  in a capture, whichever edge of the window it is clearly nearer; in the node tree, the avatar
+  level with it. The lines of a link card follow its title. Soul has no documented view
+  structure and may need adjusting on a new version.
+- The status labels apps print inside the list (Seen, Delivered, SMS · Now, Active now, call
+  records such as 已取消 / 对方无应答 / Canceled, voice-message lengths, reactions) are filtered by
+  known patterns; anything new will leak into the context. A quote of their message under my
+  reply (「Name：…」) is not a message.
 - No view ids are used anywhere (WeChat renames them every release): only TextView + text +
   screen position + long-clickability.
 - Judging sees only **messages visible on screen**, at most the last 12. Deep reads and reply
