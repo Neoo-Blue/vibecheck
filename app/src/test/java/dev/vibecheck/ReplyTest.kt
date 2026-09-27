@@ -310,6 +310,24 @@ class StreamTest {
         assertEquals("anthropic/claude-haiku-4.5", Prefs.fastOrDefault(" anthropic/claude-haiku-4.5 "))
     }
 
+    @Test fun defaultsStoredByOlderSettingsPagesMoveToTheNewDefault() {
+        val fast = setOf("deepseek/deepseek-v4-flash-vision-exp", "deepseek/deepseek-v4.1-flash")
+        assertTrue(Prefs.wasDefault(" deepseek/deepseek-v4.1-flash", fast))
+        assertFalse(Prefs.wasDefault("moonshotai/kimi-k3", fast))
+        // From now on the default is stored as nothing, and a real choice as itself.
+        assertEquals("", Prefs.stored(Prefs.DEFAULT_FAST, Prefs.DEFAULT_FAST))
+        assertEquals("", Prefs.stored("  ", Prefs.DEFAULT_FAST))
+        assertEquals("deepseek/deepseek-v4.1-flash", Prefs.stored("deepseek/deepseek-v4.1-flash ", Prefs.DEFAULT_FAST))
+        assertEquals(Prefs.DEFAULT_FAST, Prefs.fastOrDefault(Prefs.stored(Prefs.DEFAULT_FAST, Prefs.DEFAULT_FAST)))
+    }
+
+    @Test fun theOneTapModelsAreWellFormedAndIncludeTheDefaults() {
+        val slug = Regex("""^[a-z0-9-]+/[a-z0-9.\-]+$""")
+        for ((id, _) in Prefs.FAST_PICKS + Prefs.DEEP_PICKS) assertTrue(id, slug.matches(id))
+        assertEquals(Prefs.DEFAULT_FAST, Prefs.FAST_PICKS.first().first)
+        assertEquals(Prefs.DEFAULT_DEEP, Prefs.DEEP_PICKS.first().first)
+    }
+
     @Test fun adultDraftsOnlyWhenSwitchedOnAndOnlyAtTheirLevel() {
         assertFalse(OpenRouter.replySystem(false).contains("性话题"))
         val on = OpenRouter.replySystem(true)

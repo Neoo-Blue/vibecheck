@@ -390,7 +390,9 @@ class MainActivity : Activity() {
             "OpenRouter 模型名，留空用默认。深思和学习要想得深，回复要快，截图识字的聊天也用回复模型看截图。",
             "OpenRouter model ids; leave empty for the default. Think and Learn want depth, Reply wants speed; chats read by OCR also send their screenshot to the reply model.")) {
             deepModelField = field(L.t("深思和学习模型", "Think and Learn model"), prefs.deepModel, lines = 1, label = true)
-            visionModelField = field(L.t("回复和看图模型（要快，要能看图）", "Reply and screenshot model (fast, reads images)"), prefs.fastModel, lines = 1, label = true)
+            addView(picks(Prefs.DEEP_PICKS) { deepModelField })
+            visionModelField = field(L.t("回复和看图模型（要会写、要快、要能看图）", "Reply and screenshot model (writes well, fast, reads images)"), prefs.fastModel, lines = 1, label = true)
+            addView(picks(Prefs.FAST_PICKS) { visionModelField })
             addView(buttons(
                 L.t("测试深思模型", "Test deep model") to { testModel(deep = true) },
                 L.t("测试回复模型", "Test reply model") to { testModel(deep = false) },
@@ -911,6 +913,16 @@ class MainActivity : Activity() {
         setPadding(0, dp(6), 0, dp(6))
         setOnCheckedChangeListener { _, v -> onChange(v) }
     }
+
+    /** Models to pick with one tap instead of typing an id on a phone keyboard. */
+    private fun picks(models: List<Pair<String, Pair<String, String>>>, target: () -> EditText?): View =
+        wrapRow(models.map { (id, label) ->
+            pill(L.t(label.first, label.second), false) {
+                target()?.setText(id)
+                saveFields()
+                toast(L.t("已选 ", "Chosen: ") + id)
+            }
+        }).apply { setPadding(0, dp(4), 0, 0) }
 
     private fun buttons(vararg items: Pair<String, () -> Unit>): View =
         wrapRow(items.map { (label, action) -> pill(label, true) { action() } }).apply { setPadding(0, dp(6), 0, 0) }

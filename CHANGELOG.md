@@ -4,6 +4,32 @@ APKs for every version are on the [releases page](https://github.com/Neoo-Blue/v
 Each section below is also that release's notes: the Release workflow publishes the section whose
 heading matches the tag.
 
+## 6.7.4
+
+**Replies from a model that writes Chinese well.** The reply model is now Kimi K2.6
+(`moonshotai/kimi-k2.6`). Among open-weight models it has the highest EQ-Bench Creative Writing
+score, and Chinese is its first language. It reads screenshots, answers at about 70 tokens a
+second without thinking first, and is served by many providers, so the 18+ switch works with it.
+Under each model on Tools → Models there are now one-tap choices, no typing of model ids on a
+phone:
+- Reply: Kimi K2.6 (fast, writes well), Kimi K3 (writes best, #2 on EQ-Bench Creative Writing
+  behind Claude Opus 5; slower and dearer) or DeepSeek V4.1 Flash (fastest and cheapest).
+- Think and Learn: DeepSeek V4 Pro or Kimi K3.
+
+Settings pages of earlier versions saved the default model as if you had chosen it, so a new
+default never reached you. Those saved defaults are cleared once, and a default is no longer
+saved at all.
+
+中文：
+- 回复换成中文写得好的模型：Kimi K2.6（`moonshotai/kimi-k2.6`）。
+  - 它是 EQ-Bench 创意写作榜上开源模型的第一名，中文是母语。
+  - 能看截图，不先思考时每秒约 70 个字。
+  - 很多服务商都在跑它，成人回复开关也能用。
+- 「工具 → 模型」每个模型下面都有一点就换的按钮，不用在手机上打模型名：
+  - 回复：Kimi K2.6（又快又会写）、Kimi K3（写得最好，创意写作榜全球第二，仅次于 Claude Opus 5；慢一些、贵一些）、DeepSeek V4.1 Flash（最快最省）。
+  - 深思和学习：DeepSeek V4 Pro、Kimi K3。
+- 旧版设置页会把默认模型当成你选的存下来，导致新默认永远换不上。这次会清掉一次，以后也不再存默认值。
+
 ## 6.7.3
 
 **Faster replies.** Drafts took a long time for four reasons, all fixed:

@@ -162,9 +162,19 @@ card or from Tools → People. The bubble shows ⏸ while paused.
 
 **Two models, set under Tools → Models.**
 - **Think and Learn** (default `deepseek/deepseek-v4-pro`) thinks a little before it writes.
-- **Reply and screenshot** (default `deepseek/deepseek-v4.1-flash`) writes reply drafts without
+- **Reply and screenshot** (default `moonshotai/kimi-k2.6`) writes reply drafts without
   thinking first, and reads the screenshot that chats read by OCR send along (WeChat, Telegram:
   OCR cannot see stickers and emoji, and those carry most of the emotion in Chinese chat).
+  Kimi K2.6 scores highest among open-weight models on EQ-Bench Creative Writing and writes
+  Chinese first.
+
+Under each model there are one-tap choices:
+- Reply: Kimi K2.6 (fast, writes well), Kimi K3 (writes best, #2 on EQ-Bench Creative Writing
+  behind Claude Opus 5; slower and dearer) or DeepSeek V4.1 Flash (fastest and cheapest).
+- Think and Learn: DeepSeek V4 Pro or Kimi K3.
+
+Any other OpenRouter model id can be typed in. Qwen writes very natural Chinese, but Alibaba's API
+filters content, so it will not write the adult replies below.
 
 Answers are streamed, so the read and the first draft show while the rest is written. Every call
 goes to the fastest provider OpenRouter has for the model (a slug with `:nitro`, `:floor` and

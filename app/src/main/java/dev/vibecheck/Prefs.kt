@@ -10,6 +10,21 @@ import java.util.Locale
 class Prefs(ctx: Context) {
     private val sp = ctx.getSharedPreferences("jev", Context.MODE_PRIVATE)
 
+    init { forgetStoredDefaults() }
+
+    /**
+     * Settings pages before 6.7.4 stored the default model as if it had been chosen, so a newer
+     * default never reached anyone who had opened them. Those are cleared once; from now on a
+     * default is stored as nothing and follows the app.
+     */
+    private fun forgetStoredDefaults() {
+        if (sp.getInt("modelsv", 0) >= 2) return
+        val e = sp.edit()
+        if (wasDefault(sp.getString("vismodel", "") ?: "", OLD_FAST)) e.putString("vismodel", "")
+        if (wasDefault(sp.getString("deepmodel", "") ?: "", OLD_DEEP)) e.putString("deepmodel", "")
+        e.putInt("modelsv", 2).apply()
+    }
+
     /** SharedPreferences holds listeners weakly: the caller keeps a strong reference. */
     fun listen(l: SharedPreferences.OnSharedPreferenceChangeListener) = sp.registerOnSharedPreferenceChangeListener(l)
     fun unlisten(l: SharedPreferences.OnSharedPreferenceChangeListener) = sp.unregisterOnSharedPreferenceChangeListener(l)
@@ -61,18 +76,18 @@ class Prefs(ctx: Context) {
         get() = sp.getString("orkey", "") ?: ""
         set(v) = sp.edit().putString("orkey", v.trim()).apply()
 
+    /** Deep reads and profiles: depth over speed. The default is stored as nothing. */
     var deepModel: String
-        get() = sp.getString("deepmodel", DEFAULT_DEEP)?.ifBlank { DEFAULT_DEEP } ?: DEFAULT_DEEP
-        set(v) = sp.edit().putString("deepmodel", v.trim()).apply()
+        get() = sp.getString("deepmodel", "")?.trim()?.ifBlank { null } ?: DEFAULT_DEEP
+        set(v) = sp.edit().putString("deepmodel", stored(v, DEFAULT_DEEP)).apply()
 
     /**
      * Reply drafts, and every call with a screenshot attached (so stickers are actually seen):
-     * it has to be quick and read images. Deep reads and profiles use [deepModel]. A stored
-     * default of an older version counts as no choice, so it moves on with the default.
+     * it has to write well, quickly, and read images. Deep reads and profiles use [deepModel].
      */
     var fastModel: String
         get() = fastOrDefault(sp.getString("vismodel", "") ?: "")
-        set(v) = sp.edit().putString("vismodel", v.trim()).apply()
+        set(v) = sp.edit().putString("vismodel", stored(v, DEFAULT_FAST)).apply()
 
     /**
      * Reply drafts may be adult when the chat already is, between two adults (18+). Off unless
@@ -185,13 +200,36 @@ class Prefs(ctx: Context) {
         const val DEFAULT_PACKAGES = "com.tencent.mm,cn.soulapp.android,com.facebook.orca," +
             "com.google.android.apps.messaging,com.whatsapp,org.telegram.messenger,com.instagram.android"
         const val DEFAULT_DEEP = "deepseek/deepseek-v4-pro"
-        /** Fast, cheap and reads images natively; replaced V4 Flash Vision Exp on 2026-09-10. */
-        const val DEFAULT_FAST = "deepseek/deepseek-v4.1-flash"
-        /** Defaults of earlier versions for the fast model, which a saved settings page stored as if chosen. */
+        /**
+         * Kimi K2.6: the best creative writer among open-weight models (EQ-Bench Creative Writing),
+         * Chinese first, reads images, about 70 tokens a second, served by many providers.
+         */
+        const val DEFAULT_FAST = "moonshotai/kimi-k2.6"
+        /** A model no longer served, which counts as no choice. */
         private val RETIRED_FAST = setOf("deepseek/deepseek-v4-flash-vision-exp")
+        /** What earlier versions used as defaults, and their settings page stored as if chosen. */
+        private val OLD_FAST = setOf("deepseek/deepseek-v4-flash-vision-exp", "deepseek/deepseek-v4.1-flash")
+        private val OLD_DEEP = setOf("deepseek/deepseek-v4-pro")
 
         fun fastOrDefault(stored: String): String =
             stored.trim().takeIf { it.isNotEmpty() && it !in RETIRED_FAST } ?: DEFAULT_FAST
+
+        /** A stored model that an earlier version put there as its default. */
+        fun wasDefault(stored: String, old: Set<String>): Boolean = stored.trim() in old
+
+        /** What to store for a chosen model: nothing for the default, so a newer default reaches it. */
+        fun stored(chosen: String, default: String): String = chosen.trim().takeIf { it != default }.orEmpty()
+
+        /** One-tap choices on Tools → Models: id, then what it is good at. */
+        val FAST_PICKS = listOf(
+            "moonshotai/kimi-k2.6" to Pair("Kimi K2.6 · 又快又会写", "Kimi K2.6 · fast and writes well"),
+            "moonshotai/kimi-k3" to Pair("Kimi K3 · 写得最好，慢一些", "Kimi K3 · writes best, slower"),
+            "deepseek/deepseek-v4.1-flash" to Pair("DeepSeek V4.1 Flash · 最快最省", "DeepSeek V4.1 Flash · fastest, cheapest"),
+        )
+        val DEEP_PICKS = listOf(
+            "deepseek/deepseek-v4-pro" to Pair("DeepSeek V4 Pro", "DeepSeek V4 Pro"),
+            "moonshotai/kimi-k3" to Pair("Kimi K3 · 更强，贵一些", "Kimi K3 · stronger, costs more"),
+        )
 
         const val USE_JUDGE = "judge"
         const val USE_DEEP = "deep"
