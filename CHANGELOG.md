@@ -4,6 +4,40 @@ APKs for every version are on the [releases page](https://github.com/Neoo-Blue/v
 Each section below is also that release's notes: the Release workflow publishes the section whose
 heading matches the tag.
 
+## 6.8.8
+
+- **Far fewer tokens for the same answers.**
+  - **Several messages in a row are judged once.** People often send three or four short
+    messages in a row, and each one was judged as it came. Every reading but the last was paid
+    for and replaced within seconds. A new message is now judged once it has been the newest for
+    three seconds, and at most eight seconds after the first of the run. Opening a chat or
+    tapping the bubble still judges at once.
+  - **A screen read by OCR that comes out a character off is not judged again.** In WeChat the
+    same messages could be read slightly differently from one frame to the next, and each
+    difference cost a new judgment.
+  - **Learning writes its notes without thinking first.** Notes on each stretch of a history,
+    merging them, and each day's write-up record what is there, and the thinking before them was
+    most of what those calls cost. The profile itself, which weighs everything up, still thinks
+    first.
+  - **Nothing learned is paid for twice.**
+    - Merged notes are kept with the notes, so learning someone again redoes only the groups
+      whose notes changed.
+    - The profile of you is not written again when nothing it is made from has changed.
+    - A chat's newest stretch keeps its notes until it has grown by half. Anything newer is in
+      the day write-ups in the meantime.
+    - "Write my profile" still writes it from everything.
+  - **Prompts start with what does not change.** What is known about the person and about you
+    comes first, and what changes with every message comes after. Providers that cache the start
+    of a prompt they have just seen (DeepSeek, Kimi and others) charge a fraction for that part.
+- **Usage shows tokens and cost.**
+  - Tools → Usage lists each kind of call: judgments, deep reads, drafts, profiles, and about
+    you.
+  - For each it shows the calls, tokens and cost today and in total, as OpenRouter reports them,
+    plus how much was cached and how much was thinking.
+  - The profile of you and the day write-ups have their own line.
+  - Tokens are counted from this version on. For judgments they show when the service reports
+    them.
+
 ## 6.8.7
 
 - **The card stays up when you ask for drafts.** Android lets an app take one screenshot a second

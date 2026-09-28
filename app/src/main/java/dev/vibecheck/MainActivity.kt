@@ -94,6 +94,7 @@ class MainActivity : Activity() {
         Crash.install(this)
         prefs = Prefs(this)
         prefs.lang   // applies the UI language to L before anything is built
+        OpenRouter.onUsage = prefs::addUsage
         people = PersonStore(this)
 
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -513,15 +514,31 @@ class MainActivity : Activity() {
         set(Calendar.HOUR_OF_DAY, 8); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
     }.timeInMillis
 
+    /** Calls, tokens and cost per kind of call, today and in total, and where the tokens went. */
     private fun usage(): String {
-        fun line(kind: String, zh: String, en: String) =
-            L.t("$zh：今天 ${prefs.usedToday(kind)}，累计 ${prefs.usedTotal(kind)}", "$en: ${prefs.usedToday(kind)} today, ${prefs.usedTotal(kind)} total")
-        return listOf(
-            line(Prefs.USE_JUDGE, "判断", "Judgments"),
-            line(Prefs.USE_DEEP, "深思", "Deep reads"),
-            line(Prefs.USE_REPLY, "回复草稿", "Reply drafts"),
-            line(Prefs.USE_BIO, "档案", "Profiles"),
-        ).joinToString("\n")
+        val kinds = listOf(
+            Triple(Prefs.USE_JUDGE, "判断", "Judgments"),
+            Triple(Prefs.USE_DEEP, "深思", "Deep reads"),
+            Triple(Prefs.USE_REPLY, "回复草稿", "Reply drafts"),
+            Triple(Prefs.USE_BIO, "档案", "Profiles"),
+            Triple(Prefs.USE_ME, "关于我", "About me"),
+            Triple(Prefs.USE_OTHER, "设置里的测试", "Tests in settings"),
+        )
+        val lines = ArrayList<String>()
+        var today = Prefs.Spent(0, 0, 0, 0, 0, 0.0)
+        var total = today
+        for ((kind, zh, en) in kinds) {
+            val d = prefs.spent(kind, today = true)
+            val t = prefs.spent(kind, today = false)
+            if (kind == Prefs.USE_OTHER && t.tokens == 0L) continue
+            today += d
+            total += t
+            lines += L.t("$zh：今天 ${Prefs.describe(d)}；累计 ${Prefs.describe(t)}", "$en: today ${Prefs.describe(d)}; total ${Prefs.describe(t)}")
+        }
+        Prefs.breakdown(today)?.let { lines += L.t("今天", "Today") + L.t("：", ": ") + it }
+        Prefs.breakdown(total)?.let { lines += L.t("累计", "In total") + L.t("：", ": ") + it }
+        lines += L.t("token 和花费从 6.8.8 起记，按 OpenRouter 报的数", "Tokens and cost are counted from 6.8.8 on, as OpenRouter reports them")
+        return lines.joinToString("\n")
     }
 
     private fun refreshDiagnostics() {
@@ -709,7 +726,7 @@ class MainActivity : Activity() {
         if (prefs.orKey.isBlank()) { toast(L.t("先在设置页填 OpenRouter Key", "Add the OpenRouter key on the Setup tab first")); return }
         toast(L.t("正在整理关于你的档案，可能要一两分钟…", "Writing your profile; this can take a minute or two…"))
         io.execute {
-            val r = runCatching { meLearner.rebuild() }
+            val r = runCatching { meLearner.rebuild(byHand = true) }
             main.post {
                 r.onSuccess { toast(L.t("关于你的档案整理好了", "Your profile is written")) }
                     .onFailure { toast(L.t("没整理成：", "Not written: ") + Judge.describe(it)) }
@@ -1060,7 +1077,7 @@ class MainActivity : Activity() {
         toast(L.t("测试中…", "Testing…"))
         io.execute {
             val body = Jev.requestBody("测试", listOf("对方" to "你今天是不是又忘了我跟你说过什么？"))
-            val r = runCatching { Judge.ask(prefs, body) }
+            val r = runCatching { Judge.ask(prefs, body, Prefs.USE_OTHER) }
             main.post {
                 r.onSuccess { prefs.kick(); toast(L.t("成功，返回 ${it.size} 个判断", "Works: ${it.size} judgments back")) }
                     .onFailure { toast(L.t("失败：", "Failed: ") + Judge.describe(it)) }
@@ -1078,7 +1095,7 @@ class MainActivity : Activity() {
         toast(L.t("测试中…", "Testing…"))
         io.execute {
             val started = System.currentTimeMillis()
-            val r = runCatching { OpenRouter.chat(prefs.orKey, model, "Reply with the single word OK.", "ping", null, think = think) }
+            val r = runCatching { OpenRouter.chat(prefs.orKey, model, "Reply with the single word OK.", "ping", null, think = think, kind = Prefs.USE_OTHER) }
             val secs = "%.1f".format((System.currentTimeMillis() - started) / 1000.0)
             main.post {
                 r.onSuccess { toast(L.t("$model 可用，$secs 秒", "$model works, ${secs}s")) }

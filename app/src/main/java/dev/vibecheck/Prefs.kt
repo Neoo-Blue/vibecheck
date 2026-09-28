@@ -195,24 +195,64 @@ class Prefs(ctx: Context) {
 
     // ---- what the API calls add up to ----
 
-    private fun today(): String = SimpleDateFormat("yyyyMMdd", Locale.US).format(Date())
+    private fun dayStamp(): String = SimpleDateFormat("yyyyMMdd", Locale.US).format(Date())
+
+    /**
+     * A new day: yesterday's counts for today are cleared in [e]. True when they were, so what is
+     * counted next starts from zero rather than from yesterday's figures still in the store.
+     */
+    private fun newDay(e: SharedPreferences.Editor): Boolean {
+        val day = dayStamp()
+        if (sp.getString("use:day", "") == day) return false
+        for (k in USES + USE_OTHER) {
+            e.remove("use:today:$k")
+            for (f in SPENT) e.remove("use:today:$f:$k")
+        }
+        e.putString("use:day", day)
+        return true
+    }
 
     /** Counts one paid call of this kind, today and in total. Safe from any thread. */
-    @Synchronized fun countUse(kind: String) {
-        val day = today()
+    fun countUse(kind: String) = synchronized(USE_LOCK) {
         val e = sp.edit()
-        if (sp.getString("use:day", "") != day) {
-            for (k in USES) e.putInt("use:today:$k", 0)
-            e.putString("use:day", day)
-            e.putInt("use:today:$kind", 1)
-        } else {
-            e.putInt("use:today:$kind", sp.getInt("use:today:$kind", 0) + 1)
-        }
+        val today = if (newDay(e)) 0 else sp.getInt("use:today:$kind", 0)
+        e.putInt("use:today:$kind", today + 1)
         e.putInt("use:total:$kind", sp.getInt("use:total:$kind", 0) + 1).apply()
     }
 
-    fun usedToday(kind: String): Int = if (sp.getString("use:day", "") == today()) sp.getInt("use:today:$kind", 0) else 0
-    fun usedTotal(kind: String): Int = sp.getInt("use:total:$kind", 0)
+    /**
+     * What one call used (OpenRouter's own count), added to its kind today and in total: tokens
+     * in, of those how many the provider had cached, tokens out, of those how many were thinking,
+     * and the cost. Safe from any thread.
+     */
+    fun addUsage(kind: String, u: OpenRouter.Usage) = synchronized(USE_LOCK) {
+        val e = sp.edit()
+        val fresh = newDay(e)
+        val add = mapOf("in" to u.prompt.toLong(), "cached" to u.cached.toLong(), "out" to u.completion.toLong(),
+            "think" to u.reasoning.toLong(), "micro" to Math.round(u.cost * 1_000_000))
+        for ((f, n) in add) {
+            val today = "use:today:$f:$kind"
+            val total = "use:total:$f:$kind"
+            e.putLong(today, (if (fresh) 0L else sp.getLong(today, 0L)) + n)
+            e.putLong(total, sp.getLong(total, 0L) + n)
+        }
+        e.apply()
+    }
+
+    /** What calls of [kind] have used, [today] or in total. */
+    fun spent(kind: String, today: Boolean): Spent {
+        val scope = if (today) "today" else "total"
+        if (today && sp.getString("use:day", "") != dayStamp()) return Spent(0, 0, 0, 0, 0, 0.0)
+        fun long(f: String) = sp.getLong("use:$scope:$f:$kind", 0L)
+        return Spent(sp.getInt("use:$scope:$kind", 0), long("in"), long("cached"), long("out"), long("think"), long("micro") / 1_000_000.0)
+    }
+
+    /** Calls, tokens in (of which cached), tokens out (of which thinking), and dollars. */
+    data class Spent(val calls: Int, val prompt: Long, val cached: Long, val completion: Long, val reasoning: Long, val cost: Double) {
+        val tokens: Long get() = prompt + completion
+        operator fun plus(o: Spent) = Spent(calls + o.calls, prompt + o.prompt, cached + o.cached,
+            completion + o.completion, reasoning + o.reasoning, cost + o.cost)
+    }
 
     companion object {
         const val DEFAULT_PACKAGES = "com.tencent.mm,cn.soulapp.android,com.facebook.orca," +
@@ -242,6 +282,50 @@ class Prefs(ctx: Context) {
         const val USE_DEEP = "deep"
         const val USE_REPLY = "reply"
         const val USE_BIO = "bio"
-        val USES = listOf(USE_JUDGE, USE_DEEP, USE_REPLY, USE_BIO)
+        /** The profile of me and the write-ups of my days, counted with profiles before 6.8.8. */
+        const val USE_ME = "me"
+        /** A Test in settings, and anything else not one of the above. */
+        const val USE_OTHER = "other"
+        val USES = listOf(USE_JUDGE, USE_DEEP, USE_REPLY, USE_BIO, USE_ME)
+        /** What is added up per call: tokens in, cached, out, thinking, and millionths of a dollar. */
+        private val SPENT = listOf("in", "cached", "out", "think", "micro")
+        /** One lock for every Prefs: the service and the settings page each have their own, over one store. */
+        private val USE_LOCK = Any()
+
+        /** 850, 18k, 25.3k, 125k, 1.25M. */
+        fun tokens(n: Long): String = when {
+            n < 1_000 -> "$n"
+            n < 100_000 -> String.format(Locale.US, "%.1f", n / 1_000.0).removeSuffix(".0") + "k"
+            n < 1_000_000 -> "${Math.round(n / 1_000.0)}k"
+            else -> String.format(Locale.US, "%.2fM", n / 1_000_000.0)
+        }
+
+        /** $0.0042, $0.123, $3.40; a trace below a hundredth of a cent as <$0.0001. */
+        fun dollars(d: Double): String = when {
+            d > 0 && d < 0.0001 -> "<$0.0001"
+            d < 0.01 -> String.format(Locale.US, "$%.4f", d)
+            d < 1 -> String.format(Locale.US, "$%.3f", d)
+            else -> String.format(Locale.US, "$%.2f", d)
+        }
+
+        /** "5 次 · 21.4k token · $0.012", tokens and cost only once any were counted. */
+        fun describe(s: Spent): String {
+            val calls = L.t("${s.calls} 次", "${s.calls} calls")
+            if (s.tokens == 0L) return calls
+            // Tests in settings are not counted as calls, only what they used.
+            return (if (s.calls > 0) "$calls · " else "") + "${tokens(s.tokens)} token" + (if (s.cost > 0) " · ${dollars(s.cost)}" else "")
+        }
+
+        /**
+         * Where the tokens went: how much of what was sent the provider had cached (billed at a
+         * fraction), and how much of what came back was the model thinking. Null before any.
+         */
+        fun breakdown(s: Spent): String? {
+            if (s.tokens == 0L) return null
+            val cached = if (s.prompt > 0) Math.round(s.cached * 100.0 / s.prompt) else 0L
+            val think = if (s.completion > 0) Math.round(s.reasoning * 100.0 / s.completion) else 0L
+            return L.t("发出 ${tokens(s.prompt)}（$cached% 命中缓存）· 收回 ${tokens(s.completion)}（$think% 是思考）",
+                "Sent ${tokens(s.prompt)} ($cached% cached) · received ${tokens(s.completion)} ($think% thinking)")
+        }
     }
 }

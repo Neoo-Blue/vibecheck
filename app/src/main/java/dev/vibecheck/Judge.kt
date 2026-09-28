@@ -13,9 +13,9 @@ object Judge {
     const val OPENROUTER_ENDPOINT = "https://openrouter.ai/api/alpha/decisions"
     const val OPENROUTER_MODEL = "~typesafe/jev-latest"
 
-    fun ask(prefs: Prefs, body: String): Map<String, Jev.Answer> =
-        if (prefs.judge == OPENROUTER) TypeSafe.ask(prefs.orKey, viaOpenRouter(body), OPENROUTER_ENDPOINT)
-        else TypeSafe.ask(prefs.apiKey, body)
+    fun ask(prefs: Prefs, body: String, kind: String = Prefs.USE_JUDGE): Map<String, Jev.Answer> =
+        if (prefs.judge == OPENROUTER) TypeSafe.ask(prefs.orKey, viaOpenRouter(body), OPENROUTER_ENDPOINT, kind)
+        else TypeSafe.ask(prefs.apiKey, body, kind = kind)
 
     /** The same body with the model id OpenRouter expects. */
     fun viaOpenRouter(body: String): String =
@@ -75,6 +75,34 @@ object Judge {
             e is javax.net.ssl.SSLHandshakeException -> false
             e is java.io.IOException -> true
             else -> e is OpenRouter.Failure || e is TypeSafe.Failure
+        }
+    }
+
+    /**
+     * A burst of messages judged once, when it stops. People send three or four short messages
+     * in a row; each used to be judged as it came, and every reading but the last was paid for,
+     * shown for a moment and replaced. A new message is judged once it has been the newest for
+     * [quietMs], and a run of changing screens (someone still typing, or a screen read that
+     * differs a little each time) at the latest [maxMs] after it began.
+     */
+    class Settle(private val quietMs: Long = 3_000L, private val maxMs: Long = 8_000L) {
+        private var key = ""
+        private var since = 0L
+        private var began = 0L
+        private var done = true
+
+        /** How much longer to wait before judging [key], seen at [now]; 0 to judge it now. */
+        fun wait(key: String, now: Long): Long {
+            if (key != this.key) {
+                // The one before was judged, or stood long enough to be: a new run starts here.
+                if (done || now - since >= quietMs) began = now
+                this.key = key
+                since = now
+                done = false
+            }
+            val left = (minOf(since + quietMs, began + maxMs) - now).coerceAtLeast(0L)
+            if (left == 0L) done = true
+            return left
         }
     }
 
