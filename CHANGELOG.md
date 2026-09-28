@@ -4,6 +4,20 @@ APKs for every version are on the [releases page](https://github.com/Neoo-Blue/v
 Each section below is also that release's notes: the Release workflow publishes the section whose
 heading matches the tag.
 
+## 6.9.0
+
+- **Nothing is read in apps you unchecked.**
+  - The problem: a read still due a moment after you left a watched chat (a burst of messages
+    being waited out, or a retry after a screenshot Android refused) found no chat window. It
+    fell back to a picture of the whole display and took whatever app was open instead, checked
+    or not, for the chat.
+    - That app's messages were judged, counted into someone's memory and written into your day
+      log.
+  - Every read now first makes sure its app is still checked and still what is on screen.
+    Otherwise it stops, and so does every read still due.
+  - A screen picture read while you switched apps is dropped.
+  - Unchecking an app whose chat is open takes the card down at once, not at the next switch.
+
 ## 6.8.9
 
 - **Two people with emoji names are no longer taken for each other.**

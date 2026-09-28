@@ -230,7 +230,11 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     /** Settings apply at once, without restarting the accessibility service. */
     private fun onPrefChanged(key: String?) {
         when (key) {
-            "pkgs", null -> watched = prefs.packageList.toSet()
+            "pkgs", null -> {
+                watched = prefs.packageList.toSet()
+                // Unchecked while its chat is open: the card goes now, not at the next app switch.
+                if (targetPkg.isNotEmpty() && targetPkg !in watched) leaveChat("no longer watched")
+            }
             "diag" -> syncDebugRoutes()
             // A new key, or a successful Test in settings: whatever failed may work now.
             "key", "orkey", "judge", "kick" -> { failStreak = 0; retryAt = 0L; lastFailure = ""; rescanSoon() }
@@ -333,31 +337,36 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         Diag.log("named ${record.name} \"$full\" from a notification")
     }
 
-    /**
-     * Is a watched app still what the user is looking at? The top window by layer decides, not
-     * counting the keyboard, our own overlay, or small panels (heads-up notifications, the volume
-     * slider, a picture-in-picture video) that float over the chat without replacing it.
-     */
-    private fun chatOnScreen(): Boolean = runCatching {
+    /** Is a watched app still what the user is looking at? See [onScreen]. */
+    private fun chatOnScreen(): Boolean = onScreen(watched)
+
+    /** Is one of [apps] what the user is looking at? See Apps.inFront. */
+    private fun onScreen(apps: Set<String>): Boolean = runCatching {
         val dm = resources.displayMetrics
-        val screen = dm.widthPixels.toLong() * dm.heightPixels
-        val top = windows.sortedByDescending { it.layer }.firstOrNull { w ->
-            if (w.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD ||
-                w.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY ||
-                w.type == AccessibilityWindowInfo.TYPE_SPLIT_SCREEN_DIVIDER ||
-                w.type == AccessibilityWindowInfo.TYPE_MAGNIFICATION_OVERLAY
-            ) return@firstOrNull false
+        val shown = windows.map { w ->
             val r = Rect().also { w.getBoundsInScreen(it) }
-            r.width().toLong() * r.height() > screen * 0.4 || w.root?.packageName?.toString() in watched
-        } ?: return@runCatching false
-        top.type == AccessibilityWindowInfo.TYPE_APPLICATION && top.root?.packageName?.toString() in watched
+            Apps.Window(w.type, w.layer, r.width().toLong() * r.height()) { w.root?.packageName?.toString() }
+        }
+        Apps.inFront(shown, dm.widthPixels.toLong() * dm.heightPixels, apps)
     }.getOrDefault(false)
 
-    /** Out of any conversation: nothing on screen, and the next chat opened starts fresh. */
+    /**
+     * The app last read is still watched and still what is on screen. A read without it once
+     * went on regardless: a read due a moment after leaving the chat (a burst being waited out, a
+     * retry) found no chat window, fell back to a picture of the whole display, and took
+     * whatever app was open instead, watched or not, for the chat.
+     */
+    private fun targetOnScreen(): Boolean = targetPkg in watched && onScreen(setOf(targetPkg))
+
+    /**
+     * Out of any conversation: nothing on screen, no read still due, and the next chat opened
+     * starts fresh.
+     */
     private fun leaveChat(why: String) {
         screenGen++
         activeId = null
         forceJudge = false
+        main.removeCallbacks(scan)
         abortLearning(why)
         card.hide()
     }
@@ -423,6 +432,9 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
 
     private fun scanNow() {
         if (learning) return
+        // Unchecked in settings since, or no longer on screen: nothing of it is read, nor of
+        // whatever is showing instead.
+        if (!targetOnScreen()) { leaveChat("not a watched chat on screen"); return }
         hasInput = false
         onHomeScreen = false
         val root = rootFor(targetPkg)
@@ -542,6 +554,8 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                 val picture = if (!covered && titles.none { Person.looksLikeName(it.first) } && !Person.isTyping(titles)) namePicture(shot.bmp) else null
                 shot.bmp.recycle()
                 if (gen != screenGen) { rescanSoon(); return@read }   // the screen changed under the capture
+                // Another app came up while the picture was read: it is not this chat.
+                if (!targetOnScreen()) { leaveChat("left while reading the screen"); return@read }
                 onHomeScreen = Chat.looksLikeHomeScreen(placed, win)
                 hasInput = false
                 lastAvatarHash = older
