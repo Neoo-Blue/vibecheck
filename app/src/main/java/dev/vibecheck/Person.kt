@@ -271,6 +271,40 @@ object Person {
     fun samePicture(a: IntArray, b: IntArray): Boolean =
         a.size == b.size && a.isNotEmpty() && a.indices.sumOf { kotlin.math.abs(a[it] - b[it]) } / a.size <= 14
 
+    /**
+     * A picture of a name by its colours alone: per block, the share of warm (red to yellow)
+     * and of cool (green to purple) coloured pixels. The title bar's background is grey in light
+     * and in dark mode, and so are the white and black parts of an emoji: what is left is the
+     * same in both. Null when there is too little colour to go on (a grey emoji, text).
+     */
+    fun colourSignature(px: IntArray, w: Int, h: Int, cols: Int = 12, rows: Int = 3): IntArray? {
+        if (w <= 0 || h <= 0 || px.size < w * h) return null
+        val warm = IntArray(cols * rows)
+        val cool = IntArray(cols * rows)
+        val n = IntArray(cols * rows)
+        var coloured = 0
+        for (y in 0 until h) for (x in 0 until w) {
+            val p = px[y * w + x]
+            val r = (p shr 16) and 0xFF
+            val g = (p shr 8) and 0xFF
+            val b = p and 0xFF
+            val i = (y * rows / h) * cols + (x * cols / w)
+            n[i]++
+            if (maxOf(r, g, b) - minOf(r, g, b) <= 48) continue
+            coloured++
+            if (r >= g && r >= b) warm[i]++ else cool[i]++
+        }
+        if (coloured * 33 < w * h) return null
+        return IntArray(cols * rows * 2) { k ->
+            val i = k % (cols * rows)
+            if (n[i] == 0) 0 else (if (k < cols * rows) warm[i] else cool[i]) * 255 / n[i]
+        }
+    }
+
+    /** Two names' pictures with the same colours in the same places: see [colourSignature]. */
+    fun sameColours(a: IntArray, b: IntArray): Boolean =
+        a.size == b.size && a.isNotEmpty() && a.indices.sumOf { kotlin.math.abs(a[it] - b[it]) } / a.size <= 12
+
     /** Pictures of one person's name seen lately that did not match the kept one. */
     class PictureVotes {
         var seen: IntArray? = null
@@ -317,17 +351,47 @@ object Person {
     /**
      * How many bits two fingerprints disagree on. A rendering wobble flips a couple; a different
      * avatar flips most. This is what lets one contact stay one contact across scans, instead of
-     * every scan minting a fresh person (the phone had 277 of them).
+     * every scan minting a fresh person (the phone had 277 of them). Fingerprints of the two
+     * kinds ([insideHash] and the older [hashOf]) are never alike: they are of different regions.
      */
     fun hamming(a: String, b: String): Int {
-        val x = a.removePrefix("#").toLongOrNull(16) ?: return Int.MAX_VALUE
-        val y = b.removePrefix("#").toLongOrNull(16) ?: return Int.MAX_VALUE
+        val va = a.startsWith(INSIDE)
+        if (va != b.startsWith(INSIDE)) return Int.MAX_VALUE
+        val x = a.removePrefix(if (va) INSIDE else "#").toLongOrNull(16) ?: return Int.MAX_VALUE
+        val y = b.removePrefix(if (va) INSIDE else "#").toLongOrNull(16) ?: return Int.MAX_VALUE
         return java.lang.Long.bitCount(x xor y)
+    }
+
+    /**
+     * The fingerprint of the inside of an avatar, a picture light and dark mode leave as it is.
+     * The older one ([hashOf] over a strip from the screen's edge) took in the chat's background
+     * beside the avatar, which is what dark mode changes: in the other mode the same person was
+     * someone new, with nothing learned. Marked apart from those, which name people seen before.
+     */
+    fun insideHash(samples: IntArray): String = hashOf(samples).takeIf { it.isNotEmpty() }?.let { INSIDE + it.removePrefix("#") } ?: ""
+
+    fun isInsideHash(name: String) = name.startsWith(INSIDE)
+
+    private const val INSIDE = "#v2"
+
+    /** How much is known about someone, to decide which of two records of one person to keep. */
+    class Known(val name: String, val learned: Int, val seen: Int)
+
+    /**
+     * Two records found for one chat (the same person seen in light and in dark mode, before
+     * fingerprints left the background out): the one with a history read, else the one with
+     * more seen, else the first.
+     */
+    fun better(a: Known, b: Known): Known = when {
+        (a.learned > 0) != (b.learned > 0) -> if (a.learned > 0) a else b
+        a.learned != b.learned -> if (a.learned > b.learned) a else b
+        b.seen > a.seen -> b
+        else -> a
     }
 
     fun isFingerprint(name: String) = name.startsWith("#")
 
-    // ---- how I talk ----
+    // ---- how I talk, and how they do ----
 
     data class Style(
         var msgs: Int = 0,
@@ -335,7 +399,11 @@ object Person {
         var emoji: Int = 0,
         var questions: Int = 0,
         var apologies: Int = 0,
+        /** Messages that laugh or joke: 哈哈, hhh, 笑死, lol, 😂. */
+        var laughs: Int = 0,
     )
+
+    private val LAUGH = Regex("""哈{2,}|嘿嘿|嘻嘻|笑死|hh{2,}|haha|lol\b|lmao|😂|🤣|😆|😹|\[(?:偷笑|破涕为笑|捂脸|憨笑|坏笑|奸笑|Chuckle|Laugh|Facepalm|Smirk)]""", RegexOption.IGNORE_CASE)
 
     private val APOLOGY = listOf(
         "对不起", "抱歉", "不好意思", "我错了", "对不住", "原谅我",
@@ -364,7 +432,7 @@ object Person {
 
     private val BRACKETED = Regex("""\[([^\[\]\s]{1,10})]""")
 
-    /** Feed it only my own outgoing messages. */
+    /** One message of one side: mine into my style, theirs into theirs. */
     fun observe(s: Style, text: String) {
         s.msgs++
         s.chars += text.length
@@ -372,6 +440,7 @@ object Person {
         if (hasEmoji(text)) s.emoji++
         if (text.contains('？') || text.contains('?')) s.questions++
         if (APOLOGY.any { text.contains(it, ignoreCase = true) }) s.apologies++
+        if (LAUGH.containsMatchIn(text)) s.laughs++
     }
 
     fun hasEmoji(text: String): Boolean =
@@ -392,17 +461,112 @@ object Person {
                 "questions ${pct(s.questions)}, apologies ${pct(s.apologies)} (${s.msgs} messages)")
     }
 
+    /**
+     * How they write, for the judge and the drafts: what is normal for this person, so a short
+     * 「嗯」 from someone who always writes short is not read as cold, nor a joke as an attack.
+     * The traits first, then the numbers they rest on. Null until there is enough to go on.
+     */
+    fun theirStyleSummary(s: Style): String? {
+        if (s.msgs < 5) return null
+        val pct = { n: Int -> n.coerceAtMost(s.msgs) * 100 / s.msgs }
+        val avg = s.chars / s.msgs
+        val traits = listOfNotNull(
+            when {
+                avg <= 6 -> L.t("话很短，简短的回复是 Ta 的常态", "writes very short; brief replies are normal for them")
+                avg >= 25 -> L.t("话多，常发长消息", "writes a lot, often long messages")
+                else -> null
+            },
+            if (pct(s.laughs) >= 25) L.t("常笑、常开玩笑", "laughs and jokes a lot") else null,
+            when {
+                pct(s.emoji) >= 40 -> L.t("爱用表情", "uses a lot of emoji")
+                pct(s.emoji) <= 5 -> L.t("几乎不用表情", "hardly uses emoji")
+                else -> null
+            },
+            if (pct(s.questions) >= 30) L.t("常问问题", "asks a lot of questions") else null,
+        )
+        val numbers = L.t(
+            "平均 $avg 字，带表情 ${pct(s.emoji)}%，问句 ${pct(s.questions)}%，笑 ${pct(s.laughs)}%（共 ${s.msgs} 条）",
+            "avg $avg chars, emoji ${pct(s.emoji)}%, questions ${pct(s.questions)}%, laughing ${pct(s.laughs)}% (${s.msgs} messages)")
+        return (traits + numbers).joinToString(L.t("；", "; "))
+    }
+
     /** Fold another record's style into this one (linking the same person across apps). */
     fun mergeStyle(into: Style, from: Style) {
         into.msgs += from.msgs; into.chars += from.chars; into.emoji += from.emoji
-        into.questions += from.questions; into.apologies += from.apologies
+        into.questions += from.questions; into.apologies += from.apologies; into.laughs += from.laughs
     }
 
-    fun saveStyle(s: Style) = "${s.msgs}\t${s.chars}\t${s.emoji}\t${s.questions}\t${s.apologies}"
+    fun saveStyle(s: Style) = "${s.msgs}\t${s.chars}\t${s.emoji}\t${s.questions}\t${s.apologies}\t${s.laughs}"
 
     fun loadStyle(text: String): Style {
         val p = text.split('\t').map { it.toIntOrNull() ?: 0 }
-        return if (p.size < 5) Style() else Style(p[0], p[1], p[2], p[3], p[4])
+        return if (p.size < 5) Style() else Style(p[0], p[1], p[2], p[3], p[4], p.getOrElse(5) { 0 })
+    }
+
+    // ---- how a turn with them usually reads ----
+
+    /**
+     * How this person usually comes across, from every turn judged: what they are mostly doing,
+     * and how tense a turn with them usually reads. A running average that settles as the chat
+     * goes on and still follows a change: the first turns count fully, and past [NORM_WINDOW]
+     * each new turn moves it by 1/[NORM_WINDOW].
+     */
+    class Norm(var turns: Int = 0, var danger: Double = 0.0, val intents: LinkedHashMap<String, Double> = LinkedHashMap())
+
+    const val NORM_WINDOW = 40
+    private const val NORM_MIN = 5
+
+    /** One more judged turn: its intent (Jev's top answer) and its danger (0..1, as Jev read it). */
+    fun observeNorm(n: Norm, intent: String, danger: Double) {
+        n.turns++
+        val w = 1.0 / minOf(n.turns, NORM_WINDOW)
+        n.danger += (danger.coerceIn(0.0, 1.0) - n.danger) * w
+        for (k in n.intents.keys.toList()) n.intents[k] = n.intents.getValue(k) * (1 - w)
+        if (intent.isNotBlank() && intent != "unknown") n.intents[intent] = (n.intents[intent] ?: 0.0) + w
+        // What no longer carries any weight goes.
+        n.intents.keys.filter { n.intents.getValue(it) < 0.02 }.forEach { n.intents.remove(it) }
+    }
+
+    /** Null until a few turns are in. */
+    fun normSummary(n: Norm): String? {
+        if (n.turns < NORM_MIN) return null
+        val common = n.intents.entries.sortedByDescending { it.value }.filter { it.value >= 0.15 }.take(3)
+            .joinToString(L.t("、", ", ")) { "${L.label(it.key)} ${Math.round(it.value * 100)}%" }
+        val mood = when {
+            n.danger < 0.2 -> L.t("平时聊得很轻松", "usually relaxed")
+            n.danger < 0.4 -> L.t("平时偶尔有点紧张", "now and then a little tense")
+            n.danger < 0.6 -> L.t("平时常有点紧张", "often a little tense")
+            else -> L.t("平时经常很紧张", "often very tense")
+        }
+        return L.t(
+            "看过 ${n.turns} 轮：" + (if (common.isNotEmpty()) "常见的是$common；" else "") + mood,
+            "Over ${n.turns} turns: " + (if (common.isNotEmpty()) "mostly $common; " else "") + mood)
+    }
+
+    /** Two records of one person (linked across apps): weighted by how many turns each saw. */
+    fun mergeNorm(into: Norm, from: Norm) {
+        val total = into.turns + from.turns
+        if (from.turns == 0) return
+        if (into.turns == 0) { into.turns = from.turns; into.danger = from.danger; into.intents.putAll(from.intents); return }
+        val a = into.turns.toDouble() / total
+        into.danger = into.danger * a + from.danger * (1 - a)
+        for (k in (into.intents.keys + from.intents.keys).toSet()) into.intents[k] = (into.intents[k] ?: 0.0) * a + (from.intents[k] ?: 0.0) * (1 - a)
+        into.turns = total
+    }
+
+    fun saveNorm(n: Norm): String =
+        "${n.turns}\t${n.danger}\t" + n.intents.entries.joinToString("|") { "${it.key}=${it.value}" }
+
+    fun loadNorm(text: String): Norm {
+        val p = text.split('\t')
+        if (p.size < 2) return Norm()
+        val intents = LinkedHashMap<String, Double>()
+        p.getOrNull(2)?.split('|')?.forEach { kv ->
+            val k = kv.substringBeforeLast('=', "")
+            val v = kv.substringAfterLast('=', "").toDoubleOrNull()
+            if (k.isNotBlank() && v != null) intents[k] = v
+        }
+        return Norm(p[0].toIntOrNull() ?: 0, p[1].toDoubleOrNull() ?: 0.0, intents)
     }
 
     // ---- what happened before ----

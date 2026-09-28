@@ -170,6 +170,10 @@ object Jev {
         source: String? = null,
         relationship: String? = null,
         closeness: String? = null,
+        /** How they write (Person.theirStyleSummary): what is normal for them. */
+        theirStyle: String? = null,
+        /** How a turn with them usually reads (Person.normSummary). */
+        usual: String? = null,
     ): String {
         val msgs = transcript.joinToString(",") { (who, text) ->
             """{"谁":${q(who)},"内容":${q(text)}}"""
@@ -180,6 +184,10 @@ object Jev {
         closeness?.takeIf { it.isNotBlank() }?.let { parts.add(""""我们有多亲近":${q(it)}""") }
         context.takeIf { it.isNotBlank() }?.let { parts.add(""""关系背景":${q(it)}""") }
         style?.takeIf { it.isNotBlank() }?.let { parts.add(""""我平时的说话方式":${q(it)}""") }
+        // What is normal for this person, learned turn by turn: read this turn against it, so a
+        // short answer from someone who always writes short is not cold, nor a joke an attack.
+        theirStyle?.takeIf { it.isNotBlank() }?.let { parts.add(""""对方平时的说话方式":${q(it)}""") }
+        usual?.takeIf { it.isNotBlank() }?.let { parts.add(""""对方平时的状态":${q(it + L.t("（仅供参考，这一轮以对话本身为准）", " (for reference; this turn is judged on the conversation itself)"))}""") }
         history?.takeIf { it.isNotBlank() }?.let { parts.add(""""我们最近几轮的走向":${q(it)}""") }
         relation?.takeIf { it.isNotBlank() }?.let { parts.add(""""这段关系的长期观察":${q(it)}""") }
         // The model should know the transcript has holes, rather than read silence as meaning.

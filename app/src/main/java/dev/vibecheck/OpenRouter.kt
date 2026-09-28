@@ -385,6 +385,8 @@ object OpenRouter {
         closeness: String? = null,
         profile: String? = null,
         me: String? = null,
+        /** How they write (Person.theirStyleSummary). */
+        theirStyle: String? = null,
     ): String = buildString {
         append(L.t("对方：", "Them: ")).append(peer).append('\n')
         val who = listOfNotNull(relationship?.takeIf { it.isNotBlank() }, closeness?.takeIf { it.isNotBlank() })
@@ -393,6 +395,7 @@ object OpenRouter {
         profile?.takeIf { it.isNotBlank() }?.let { append(L.t("\nTa 的档案（从我们的全部聊天记录里学的）：\n", "\nTheir profile (learned from our whole history):\n")).append(it.trim()).append("\n\n") }
         me?.takeIf { it.isNotBlank() }?.let { append(L.t("\n关于我（从我所有的聊天里学的）：\n", "\nAbout me (learned across all my chats):\n")).append(it.trim()).append("\n\n") }
         style?.let { append(L.t("我平时的说话方式：", "How I usually write: ")).append(it).append('\n') }
+        theirStyle?.let { append(L.t("Ta 平时的说话方式：", "How they usually write: ")).append(it).append('\n') }
         history?.let { append(L.t("我们最近几轮的走向：", "Where the last few turns went: ")).append(it).append('\n') }
         relation?.let { append(L.t("这段关系的长期观察：", "Long-term observations: ")).append(it).append('\n') }
         append(L.t("\n最近的对话（从上到下；「我」是我发的，「对方」是 Ta 发的）：\n", "\nRecent messages (top to bottom; \"me\" is mine, \"them\" is theirs):\n"))

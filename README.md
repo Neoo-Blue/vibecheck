@@ -153,12 +153,13 @@ Score answers carry their meaning ("3 / 4 · today", "5 / 6 · risky"), not just
 | ✕ | back to the bubble |
 
 Think, Reply, Learn and ⋯ can each be switched off under Tools → Card. The deep read and the
-reply drafts are separate panels, so an automatic deep read landing later does not wipe the
-drafts you were choosing from. Long-press any line on the card to copy it.
+reply drafts are separate panels, so one landing later does not wipe the other. Long-press any
+line on the card to copy it.
 
 Think and Reply only run when you press them (roughly $0.0002 to $0.001 each). Every new message
-runs Jev alone: a few hundred milliseconds, cheap. Turns that deserve it also get an automatic
-deep pass while you are still in that chat; the bubble shows ✦ when there is something to read.
+runs Jev alone: a few hundred milliseconds, cheap. An automatic deep pass on turns that deserve it
+can be switched on under Setup → Behaviour (off by default: it is a paid call each time); the
+bubble then shows ✦ when there is something to read.
 
 Each chat keeps its own card: switch to another chat and back, and the last judgment is still
 there without asking again. A failed call (no connection, a rejected key) is shown on the card and

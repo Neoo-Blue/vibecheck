@@ -56,6 +56,10 @@ class PersonStore(ctx: Context) {
         val apps: List<String> = listOf(id.substringBefore('|')),
         /** The id this chat was opened under; differs from [id] for a chat linked into another. */
         val own: String = id,
+        /** How they write, from their messages as they come and from history reads. */
+        var theirStyle: Person.Style = Person.Style(),
+        /** How a turn with them usually reads, from every turn judged. */
+        var norm: Person.Norm = Person.Norm(),
     )
 
     /** Linked records point at the one that holds the memory. */
@@ -74,6 +78,8 @@ class PersonStore(ctx: Context) {
         val b = loadId(intoId)
         Relation.merge(b.stats, a.stats)
         Person.mergeStyle(b.style, a.style)
+        Person.mergeStyle(b.theirStyle, a.theirStyle)
+        Person.mergeNorm(b.norm, a.norm)
         Learner.merge(b.model, a.model)
         b.history = (a.history + b.history).takeLast(Person.HISTORY)
         if (b.note.isBlank()) b.note = a.note
@@ -128,6 +134,8 @@ class PersonStore(ctx: Context) {
             closeByHand = sp.getBoolean("$id:closeset", false),
             alias = sp.getString("$id:alias", "") ?: "",
             own = own,
+            theirStyle = Person.loadStyle(sp.getString("$id:tstyle", "") ?: ""),
+            norm = Person.loadNorm(sp.getString("$id:norm", "") ?: ""),
         )
     }
 
@@ -150,6 +158,8 @@ class PersonStore(ctx: Context) {
             .putString("${r.id}:close", r.close)
             .putBoolean("${r.id}:closeset", r.closeByHand)
             .putString("${r.id}:alias", r.alias)
+            .putString("${r.id}:tstyle", Person.saveStyle(r.theirStyle))
+            .putString("${r.id}:norm", Person.saveNorm(r.norm))
         if (r.legacySeen.isEmpty()) e.remove("${r.id}:seen")
         if (r.id !in ids) e.putString("index", (ids + r.id).joinToString("\n"))
         e.apply()
@@ -253,26 +263,65 @@ class PersonStore(ctx: Context) {
     }
 
     /**
-     * Snap a freshly computed fingerprint onto the closest existing one for this app, so a
-     * pixel-level wobble reuses the contact's memory instead of creating a stranger. Prefers the
-     * record with the most history when several are within tolerance.
+     * The person an older-style avatar fingerprint names, allowing a few bits of wobble, or null
+     * when nobody is that close: it never makes up someone new.
+     * Records merged into another are looked at too, and give the one they were merged into.
      */
-    fun resolveFingerprint(pkg: String, hash: String, maxDist: Int = 3): String {
-        if (!Person.isFingerprint(hash)) return hash
+    fun existingFingerprint(pkg: String, hash: String, maxDist: Int = 3): String? {
+        if (!Person.isFingerprint(hash)) return null
         var best: String? = null
         var bestDist = Int.MAX_VALUE
         var bestSeen = -1
-        for (id in index()) {
-            if (!id.startsWith("$pkg|#")) continue
-            val existing = id.substringAfter('|')
-            val d = Person.hamming(hash, existing)
+        for (id in fingerprintIds(pkg)) {
+            val d = Person.hamming(hash, id.substringAfter('|'))
             if (d > maxDist) continue
-            val seen = Relation.load(sp.getString("$id:stats", "") ?: "").let { it.theirMsgs + it.myMsgs }
-            if (d < bestDist || (d == bestDist && seen > bestSeen)) {
-                best = existing; bestDist = d; bestSeen = seen
-            }
+            val c = canonical(id)
+            val seen = Relation.load(sp.getString("$c:stats", "") ?: "").let { it.theirMsgs + it.myMsgs }
+            if (d < bestDist || (d == bestDist && seen > bestSeen)) { best = c.substringAfter('|'); bestDist = d; bestSeen = seen }
         }
-        return best ?: hash
+        return best
+    }
+
+    /** Everyone in [pkg] known by a fingerprint, as listed (not those merged into someone). */
+    fun fingerprintPeople(pkg: String): List<String> = index().filter { it.startsWith("$pkg|#") }
+
+    /** Everyone in [pkg] known by a fingerprint: in the list, or merged into someone who is. */
+    private fun fingerprintIds(pkg: String): List<String> =
+        index().filter { it.startsWith("$pkg|#") } + sp.all.keys.filter { it.startsWith("link:$pkg|#") }.map { it.removePrefix("link:") }
+
+    private fun printLinks(pkg: String): List<Pair<String, String>> =
+        (sp.getString("plinks:$pkg", "") ?: "").lineSequence()
+            .mapNotNull { l -> l.split('\t').takeIf { it.size == 2 }?.let { it[0] to it[1] } }.toList()
+
+    /** The inside of an avatar ([Person.insideHash]) remembered against the person it belongs to. */
+    fun rememberPrint(pkg: String, hash: String, name: String) {
+        val links = printLinks(pkg)
+        // A bit of wobble on an avatar already remembered for them is not worth rewriting the store.
+        if (links.any { it.second == name && Person.hamming(it.first, hash) <= 1 }) return
+        val kept = (links.filter { it.first != hash } + (hash to name)).takeLast(200)
+        sp.edit().putString("plinks:$pkg", kept.joinToString("\n") { "${it.first}\t${it.second}" }).apply()
+    }
+
+    /**
+     * Whose avatar this is by its inside, and how many bits off: from the remembered links, and
+     * from people named by such a fingerprint in the first place. The one they were merged into,
+     * if they were.
+     */
+    fun printOwner(pkg: String, hash: String, maxDist: Int = 3): Pair<String, Int>? {
+        val named = fingerprintIds(pkg).map { it.substringAfter('|') }.filter { Person.isInsideHash(it) }.map { it to it }
+        return (printLinks(pkg) + named)
+            .map { (h, name) -> name to Person.hamming(h, hash) }
+            .filter { it.second <= maxDist }
+            .minByOrNull { it.second }
+            ?.let { (name, d) -> canonical("$pkg|$name").substringAfter('|') to d }
+    }
+
+    /** How much is known about someone in [pkg], by the name their record goes under. */
+    fun known(pkg: String, name: String): Person.Known {
+        val c = canonical("$pkg|$name")
+        val stats = Relation.load(sp.getString("$c:stats", "") ?: "")
+        val learned = sp.getInt("$c:learned", 0).takeIf { it > 0 } ?: if ((sp.getString("$c:bio", "") ?: "").isNotBlank()) 1 else 0
+        return Person.Known(c.substringAfter('|'), learned, stats.theirMsgs + stats.myMsgs)
     }
 
     fun forget(id: String, keepArchive: Boolean = false) {
@@ -284,7 +333,7 @@ class PersonStore(ctx: Context) {
             .remove("$id:learn").remove("$id:hist").remove("$id:stats").remove("$id:seen")
             .remove("$id:tail").remove("$id:muted").remove("$id:rel").remove("$id:relset")
             .remove("$id:close").remove("$id:closeset").remove("$id:alias").remove("$id:notes")
-            .remove("$id:bio").remove("$id:learned").remove("$id:aliases")
+            .remove("$id:bio").remove("$id:learned").remove("$id:aliases").remove("$id:tstyle").remove("$id:norm")
             .putString("index", index().filter { it != id }.joinToString("\n"))
         for (x in aliasesOf(id)) e.remove("link:$x")
         e.apply()

@@ -173,6 +173,26 @@ object Profile {
     }
 
     /**
+     * What reply drafts get: the parts of the profile that shape a reply, most useful first,
+     * within [max] characters. The whole profile, often a few thousand characters, used to go
+     * with every draft of three short lines. A part that does not fit is left out and the next,
+     * shorter one tried; an older free-form profile goes as far as it fits.
+     */
+    fun forDrafts(profile: String, max: Int = 1200): String {
+        val secs = sections(profile)
+        if (secs.none { it.id != null }) return profile.trim().take(max)
+        val sb = StringBuilder()
+        for (id in listOf("us", "mine", "their", "jokes", "sore", "likes", "dislikes", "who", "topics", "comfort", "events")) {
+            val s = secs.firstOrNull { it.id == id && it.lines.isNotEmpty() } ?: continue
+            val line = "【${s.heading}】${s.text}"
+            if (sb.isNotEmpty() && sb.length + line.length + 1 > max) continue
+            if (sb.isNotEmpty()) sb.append('\n')
+            sb.append(line.take(max))
+        }
+        return sb.toString()
+    }
+
+    /**
      * One line about the person for the People list: how we get along, else who they are, else
      * the start of an older free-form profile. Null for no profile.
      */

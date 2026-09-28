@@ -325,7 +325,7 @@ class MainActivity : Activity() {
 
         addView(tile(null, L.t("行为", "Behaviour")) {
             addView(switch(L.t("启用解读", "Judging on"), prefs.enabled) { prefs.enabled = it; refreshSetup() })
-            addView(switch(L.t("值得细看的消息自动深思（只在非闲聊时）", "Auto deep read on turns that matter (not on small talk)"), prefs.autoDeep) { prefs.autoDeep = it })
+            addView(switch(L.t("值得细看的消息自动深思（每次都要调用模型，默认关）", "Auto deep read on turns that matter (a paid call each time; off by default)"), prefs.autoDeep) { prefs.autoDeep = it })
             addView(switch(L.t("回复可以带成人内容（18+）：聊到了才写，尺度跟着对方走", "Adult replies (18+): only when the chat already goes there, at their level"), prefs.adult) { prefs.adult = it })
             addView(switch(L.t("了解我：跨聊天记下我的日常，每天写个小结，回复照我的生活来写（记录只存在手机上）",
                 "Learn about me: a day log across chats, a write-up of each day, replies drawn from my life (the log stays on this phone)"), prefs.aboutMe) { prefs.aboutMe = it })
@@ -847,14 +847,16 @@ class MainActivity : Activity() {
         // What watching and judging them has taught.
         val watched = listOfNotNull(
             Relation.summary(r.stats)?.let { L.t("聊天：", "Chats: ") + it },
+            Person.theirStyleSummary(r.theirStyle)?.let { L.t("Ta 的说话方式：", "How they write: ") + it },
+            Person.normSummary(r.norm)?.let { L.t("Ta 平时：", "Usually: ") + it },
             Person.styleSummary(r.style)?.let { L.t("你对 Ta：", "You to them: ") + it },
             people.archiveCount(id).takeIf { it > 0 }?.let { L.t("手机上存着 $it 条聊天记录", "$it messages kept on this phone") },
         )
         val taught = Learner.plain(r.model)
         val recent = Person.historySummary(r.history)
         if (watched.isNotEmpty() || taught.isNotEmpty() || recent != null) addView(tile(null, L.t("边聊边学到的", "Learned while you chat"), L.t(
-            "不用点学习，聊天时自动记下的。判断的学习看的是给出建议后，下一轮气氛是缓和了还是更僵了。",
-            "Recorded as you chat, without Learn. Judging learns from whether things calmed down or got worse after the card's advice.")) {
+            "不用点学习，聊天时自动记下的。Ta 的说话方式和平时的状态每一轮都会告诉判断模型，聊得越久，判断越贴近 Ta。判断的学习看的是给出建议后，下一轮气氛是缓和了还是更僵了。",
+            "Recorded as you chat, without Learn. How they write and how they usually come across go to the judge with every turn, so the longer you talk, the more its reading fits them. Judging learns from whether things calmed down or got worse after the card's advice.")) {
             for (l in watched) addView(text(l, 14f, fg()).apply { setPadding(0, dp(3), 0, dp(3)) })
             for (l in taught) addView(text("• $l", 14f, fg()).apply { setPadding(0, dp(3), 0, dp(3)) })
             recent?.let { addView(text(L.t("最近几轮：", "Last few turns: ") + it, 13f, sub()).apply { setPadding(0, dp(3), 0, 0) }) }
