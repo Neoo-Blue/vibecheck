@@ -7,6 +7,8 @@ name: Release
 #   - pushing a tag like v6.6.0 (it has to match versionName);
 #   - running it by hand with a tag. Running it for an existing release replaces the APK,
 #     e.g. after adding the signing key below.
+# Every push to master also brings the notes of earlier releases in line with their changelog
+# entries, when those were edited after the release.
 #
 # Signing: every release is signed with the one key in app/signing/release.p12, so each version
 # installs over the one before. The key file is encrypted; its password is the repository secret
@@ -130,3 +132,25 @@ jobs:
           else
             gh release create "$TAG" "$APK" --target "$GITHUB_SHA" --title "Vibecheck $VERSION" --notes-file notes.md
           fi
+
+      - name: Earlier release notes follow the changelog
+        # A changelog entry edited after its release (a correction, or wording taken out) is carried
+        # over to that release's notes. Only the part above the install notes is replaced; the
+        # install notes and the checksum stay as published. Notes laid out otherwise (6.5.1 and
+        # older) are left alone, and nothing here can hold up a release.
+        if: github.event_name == 'push' && github.ref_type == 'branch'
+        continue-on-error: true
+        run: |
+          for TAG in $(gh release list --limit 100 --json tagName --jq '.[].tagName'); do
+            gh release view "$TAG" --json body --jq .body > body.md || continue
+            # Published notes: the section, a blank line, "---", a blank line, then **Install.**
+            SEP=$(grep -n '^---$' body.md | head -1 | cut -d: -f1)
+            [ -n "$SEP" ] || continue
+            sed -n "$((SEP + 2))p" body.md | grep -q '^\*\*Install\.\*\*' || continue
+            awk -v v="${TAG#v}" '/^## / { if (found) exit; if ($2 == v) { found = 1; next } } found' CHANGELOG.md > section.md
+            [ -s section.md ] || continue
+            { cat section.md; echo; } > want.md
+            head -n $((SEP - 1)) body.md | cmp -s - want.md && continue
+            { cat want.md; tail -n +"$SEP" body.md; } > notes.md
+            gh release edit "$TAG" --notes-file notes.md && echo "The notes of $TAG follow the changelog again."
+          done

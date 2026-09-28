@@ -138,7 +138,7 @@ object Chat {
         if (box.bottom > win.top + h * 0.96) return true
         // Centered short text in a chat list is a date divider or "对方撤回了一条消息". Centered
         // means as far from both edges: next to an avatar, a message of theirs that ends past
-        // the middle ("不是美女，有什么好看的" on Soul) has its centre near the middle too.
+        // the middle ("最近太忙了，下次再说吧" on Soul) has its centre near the middle too.
         if (abs((box.left - win.left) - (win.right - box.right)) < win.width * 0.06 && box.width < win.width * 0.55) return true
         return false
     }
@@ -285,8 +285,7 @@ object Chat {
      * A quote of a message further up the screen, whoever is quoted: 「名字：原话」 where the words
      * after the colon are that message (WeChat cuts a long one short with "…"). Their quote of my
      * message sits on their side under my name, which is not theirs and which OCR cannot always
-     * read (「A°😉：女大is no more」 under "The more I want to know the more 醋"): the words give it
-     * away instead.
+     * read (「Ken：周六works for me」 under their own message): the words give it away instead.
      */
     fun withoutEchoes(bubbles: List<Bubble>): List<Bubble> =
         bubbles.filterIndexed { i, b ->

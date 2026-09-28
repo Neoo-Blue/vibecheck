@@ -39,7 +39,7 @@ class DebugServer(private val token: () -> String, private val host: Host) {
     }
 
     private var socket: ServerSocket? = null
-    private val pool = Executors.newFixedThreadPool(2)
+    private val pool = Executors.newFixedThreadPool(2, Crash.threads("vibecheck-debug"))
     @Volatile private var running = false
     @Volatile private var stopped = false
 
@@ -48,7 +48,7 @@ class DebugServer(private val token: () -> String, private val host: Host) {
         return try {
             socket = ServerSocket(port)
             running = true
-            Thread({ loop() }, "jev-debug").apply { isDaemon = true }.start()
+            Thread({ loop() }, "jev-debug").apply { isDaemon = true; setUncaughtExceptionHandler { t, e -> Crash.caught(t.name, e) } }.start()
             Diag.log("debug server listening on :$port")
             true
         } catch (e: Exception) {
@@ -69,7 +69,10 @@ class DebugServer(private val token: () -> String, private val host: Host) {
     private fun loop() {
         while (running) {
             val client = try { socket?.accept() ?: break } catch (e: Exception) { break }
-            runCatching { pool.execute { handle(client) } }.onFailure { client.close() }
+            // A client that goes quiet or hangs up mid-answer (a browser's spare connection, a tab
+            // closed while /shot waits) is that request's problem, never the service's.
+            runCatching { pool.execute { runCatching { handle(client) }.onFailure { Diag.log("debug: ${it.javaClass.simpleName}: ${it.message}") } } }
+                .onFailure { runCatching { client.close() } }
         }
     }
 

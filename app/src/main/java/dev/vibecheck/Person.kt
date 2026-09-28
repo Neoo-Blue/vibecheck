@@ -89,7 +89,7 @@ object Person {
         if (cps.isEmpty() || cps.size > 24) return false
         val letters = cps.count { Character.isLetter(it) }
         if (letters >= 2 && letters * 10 >= cps.size * 6) return true   // at least 60% letters
-        // Names like "🍵", "❤️" or "Dory🐟" are legitimate; clock and icon noise is not, so every
+        // Names like "🌙", "❤️" or "Dory🐟" are legitimate; clock and icon noise is not, so every
         // character has to be a letter or part of an emoji: the pictograph itself, or the
         // variation selector, joiner or skin tone that goes with it.
         val pictographs = cps.count { isPictograph(it) }

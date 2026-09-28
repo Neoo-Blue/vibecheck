@@ -72,6 +72,8 @@ class MainActivity : Activity() {
     private var loaded = false
 
     private lateinit var readiness: TextView
+    /** Says the app closed unexpectedly last time, until dismissed; hidden otherwise. */
+    private lateinit var crashBanner: LinearLayout
     private lateinit var checklist: LinearLayout
     private lateinit var setupPage: ScrollView
     private lateinit var toolsPage: ScrollView
@@ -96,6 +98,9 @@ class MainActivity : Activity() {
 
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         root.addView(header())
+        crashBanner = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }.also {
+            root.addView(it, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { leftMargin = dp(14); rightMargin = dp(14); topMargin = dp(6) })
+        }
         readiness = text("", 13f, sub()).also {
             root.addView(it, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { leftMargin = dp(20); rightMargin = dp(20) })
         }
@@ -137,6 +142,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        refreshCrashBanner()
         refreshSetup()
         refreshTools()
         refreshPeople()
@@ -166,6 +172,36 @@ class MainActivity : Activity() {
             v.setPadding(bars.left, bars.top, bars.right, maxOf(bars.bottom, ime.bottom))
             insets
         }
+    }
+
+    /**
+     * When the app or its service last ended because something went wrong (a crash, including
+     * one in native code, "not responding", or being killed for memory): what it was, with a
+     * button to copy the details and send them on.
+     */
+    private fun refreshCrashBanner() {
+        val b = crashBanner
+        b.removeAllViews()
+        val record = Crash.unseenExit(this)
+        if (record == null) { b.visibility = View.GONE; return }
+        b.visibility = View.VISIBLE
+        b.setPadding(dp(14), dp(10), dp(14), dp(4))
+        b.background = rounded(tileBg(), dp(12))
+        b.addView(text(L.t("Vibecheck 上次意外退出了", "Vibecheck closed unexpectedly last time"), 15f, warn(), bold = true))
+        b.addView(text(record.lineSequence().first().take(200), 12f, fg()).apply { setPadding(0, dp(4), 0, 0) })
+        b.addView(text(L.t(
+            "点「复制原因」把完整记录发过来，就能查到是哪里出的问题。「工具 → 诊断」里也能看到。",
+            "Copy the details and send them on to find out what went wrong. They are under Tools → Diagnostics too."), 12f, sub()).apply {
+            setPadding(0, dp(4), 0, dp(8))
+        })
+        b.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(pill(L.t("复制原因", "Copy details"), true) {
+                getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("vibecheck", Crash.report(record)))
+                toast(L.t("已复制", "Copied"))
+            })
+            addView(pill(L.t("知道了", "Dismiss"), false) { Crash.dismissExit(this@MainActivity); refreshCrashBanner() })
+        })
     }
 
     // ---- frame: title, language, tabs ----
@@ -506,7 +542,11 @@ class MainActivity : Activity() {
         val log = Diag.dump().lines().takeLast(8).filter { it.isNotBlank() }
         if (log.isNotEmpty()) { lines.add(""); lines.addAll(log) }
         // What went wrong last, kept across restarts: long-press to copy it and send it on.
-        Crash.last()?.let { lines.add(""); lines.add(L.t("上次出错（长按可复制）：", "Last crash (long-press to copy):")); lines.addAll(it.lines().take(16)) }
+        val last = Crash.last()
+        Crash.lastExit()?.takeIf { it != last }?.let {
+            lines.add(""); lines.add(L.t("上次意外退出（长按可复制）：", "Last unexpected exit (long-press to copy):")); lines.addAll(it.lines().take(16))
+        }
+        last?.let { lines.add(""); lines.add(L.t("上次出错（长按可复制）：", "Last error (long-press to copy):")); lines.addAll(it.lines().take(16)) }
         d.text = lines.joinToString("\n")
     }
 
@@ -624,8 +664,9 @@ class MainActivity : Activity() {
             if (n > 0) addView(buttons(L.t("总结今天", "Write up today") to { summarizeToday() }))
             for (d in me.days().filter { it != today }.take(30)) {
                 addView(text(Me.dayLabel(d), 14f, accent(), bold = true).apply { setPadding(0, dp(10), 0, dp(2)) })
-                addView(text(me.summary(d) ?: L.t("还没写小结（${me.lines(d).size} 条）", "Not written up yet (${me.lines(d).size} messages)"), 14f, fg())
-                    .apply { setTextIsSelectable(true) })
+                // Read once: both languages' texts are built, and the log is read for the count.
+                val summary = me.summary(d) ?: me.lines(d).size.let { c -> L.t("还没写小结（$c 条）", "Not written up yet ($c messages)") }
+                addView(text(summary, 14f, fg()).apply { setTextIsSelectable(true) })
             }
         })
 
@@ -1285,8 +1326,7 @@ class MainActivity : Activity() {
      * without opening the chat: only the stretches whose text changed, or everything.
      */
     private fun rewrite(id: String, kept: Int) {
-        val svc = ChatReaderService.running
-        if (svc == null) {
+        if (ChatReaderService.running == null) {
             toast(L.t("Vibecheck 的无障碍服务没开：先在「设置」里打开它", "Vibecheck's accessibility service is off: switch it on under Setup first"))
             return
         }
@@ -1297,14 +1337,20 @@ class MainActivity : Activity() {
                     "只更新变了的：内容没变的段落沿用以前的笔记，省钱。\n全部重做：每一段都重新整理，适合换了模型以后，花费多一些。",
                 "Write their profile again from the $kept messages kept on this phone, without opening the chat. The progress shows on this page, and the screen stays on while it runs.\n\n" +
                     "Only what changed: stretches whose text is the same keep their notes, which costs less.\nEverything: every stretch is noted again, for after a model change; it costs more."))
-            .setPositiveButton(L.t("只更新变了的", "Only what changed")) { _, _ -> startRewrite(svc, id, fresh = false) }
-            .setNeutralButton(L.t("全部重做", "Everything")) { _, _ -> startRewrite(svc, id, fresh = true) }
+            .setPositiveButton(L.t("只更新变了的", "Only what changed")) { _, _ -> startRewrite(id, fresh = false) }
+            .setNeutralButton(L.t("全部重做", "Everything")) { _, _ -> startRewrite(id, fresh = true) }
             .setNegativeButton(L.t("取消", "Cancel"), null)
             .show()
     }
 
-    private fun startRewrite(svc: ChatReaderService, id: String, fresh: Boolean) {
-        val why = svc.rewriteFromKept(id, fresh)
+    private fun startRewrite(id: String, fresh: Boolean) {
+        // Looked up again: the service may have stopped (or started anew) while the dialog was open.
+        val svc = ChatReaderService.running
+        if (svc == null) {
+            toast(L.t("Vibecheck 的无障碍服务没开：先在「设置」里打开它", "Vibecheck's accessibility service is off: switch it on under Setup first"))
+            return
+        }
+        val why = runCatching { svc.rewriteFromKept(id, fresh) }.getOrElse { L.t("没能开始：${it.message}", "Could not start: ${it.message}") }
         if (why != null) { toast(why); return }
         toast(L.t("开始重新分析，进度在这一页", "Rewriting; the progress is on this page"))
         showPerson(id)

@@ -148,7 +148,7 @@ class SidesTest {
             // The phone icon read as a mark or a letter.
             "C 已取消", "已取消 C", "& Canceled", "© 对方已取消", "Cancelled.",
             // A voice message's length, and with its sound-wave icon read as brackets and dots
-            // (learned as "likes abstract emoticons and brackets" in a 🍵 profile).
+            // (kept as messages, they read like someone who types odd symbols).
             "5\"", "12″", "59”", "3\" ((", "4\"(。", "2\"(•", "))) 12\"", "8\" C",
         )) assertTrue(t, Chat.isNotification(t))
         for (t in listOf(

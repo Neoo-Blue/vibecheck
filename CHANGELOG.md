@@ -4,6 +4,48 @@ APKs for every version are on the [releases page](https://github.com/Neoo-Blue/v
 Each section below is also that release's notes: the Release workflow publishes the section whose
 heading matches the tag.
 
+## 6.8.6
+
+- **Replies no longer hang.** A model stuck in a provider's queue kept the panel on "Thinking…"
+  for minutes: OpenRouter's "still processing" pings kept the connection open, so nothing timed
+  out. Now:
+  - the panel counts the seconds while it waits;
+  - a model that has not started within 40 seconds (a deep read: 90), stops in the middle for
+    that long, or is still thinking after 75 seconds (a deep read: 3 minutes) is given up on, and
+    the backup model is asked straight away, without the screenshot. The panel says so;
+  - an answer that is coming is never cut off for being slow, up to 2½ minutes for drafts and 5
+    for a deep read;
+  - drafts no longer wait for a deep read or an older draft to finish before they start.
+- **Why it closed is kept, and shown.** Besides crashes in the app's own code, Android's account
+  of how the app last ended is read when that was not normal: a crash in native code, "not
+  responding", killed for memory or by the system. The next time you open the app, a banner says
+  so, with a button that copies the details to send on. Tools → Diagnostics keeps them too.
+- **Fewer ways to crash or freeze.**
+  - Whatever goes wrong on the main thread, a tap on the card or a frame being drawn included, is
+    logged and the app carries on, instead of the service ending and starting again. So are errors
+    that are not exceptions, such as running out of memory on a screenshot.
+  - Stopping a history read, and starting one for someone learned before, read and wrote the whole
+    kept history while the app could do nothing else: seconds for a long one, long enough for
+    Android to close the app as not responding. That now happens in the background.
+  - A chat app that is slow to describe its screen no longer holds Vibecheck up: after two seconds
+    the screen is read by OCR instead.
+  - With the LAN debug endpoint on, a browser hanging up mid-request no longer ends the service.
+- Day logs older than 90 days are deleted even without an OpenRouter key.
+
+中文：
+- **回复不再卡住**：模型在服务商那边排队时，OpenRouter 会一直发「还在处理」的信号，连接不会超时，面板就一直停在「思考中…」好几分钟，最后还是失败。现在：
+  - 等待时面板上显示已经等了几秒；
+  - 40 秒还没开始写（深思 90 秒）、写到一半停了这么久、或者想了 75 秒还没开始回答（深思 3 分钟）的模型会被放弃，马上换备用模型再问一次（不带截图），面板上会写明；
+  - 正在写的回答不会因为慢被打断，回复最多等 2 分半，深思最多 5 分钟；
+  - 回复不用再等深思或者上一次的回复写完才开始。
+- **记下为什么退出，并告诉你**：除了应用自己代码里的崩溃，现在也会读取 Android 记录的上次退出原因：原生代码崩溃、「应用无响应」、因为内存不足或被系统杀掉。下次打开应用时，最上面会提示，并有「复制原因」按钮，方便把详细记录发出来。「工具 → 诊断」里也能看到。
+- **更不容易闪退、卡住**：
+  - 主线程上出的错（包括点卡片、画界面时出的错）会记下来并接着运行，不再让服务退出再重启。内存不足这类错误也一样，比如截图时内存不够；
+  - 停止读聊天记录、以及给学过的人再点学习时，以前要在前台把整份存档读一遍、写一遍，记录很长时要好几秒，Android 会以「应用无响应」把它关掉。现在都放到后台做；
+  - 聊天应用本身卡的时候，读屏幕超过两秒就放弃，改用截图识字，不再拖着 Vibecheck 一起卡；
+  - 打开局域网排查接口时，浏览器中途断开不会再让服务退出。
+- 没填 OpenRouter Key 时，超过 90 天的每日记录也会删除。
+
 ## 6.8.5
 
 - **A second model stands in.** When the model asked fails in a way another might not (busy, down,
@@ -32,14 +74,14 @@ heading matches the tag.
 
 - **Voice messages are not messages.** WeChat shows a voice message's length beside a sound-wave
   icon, and OCR read the two together as 「3" ((」「4"(。」「2"(•」. Kept as messages, those made a
-  profile say you "like abstract emoticons and brackets". They are now left out, on screen and in
+  profile describe odd symbols as your style. They are now left out, on screen and in
   kept history. Tap Learn once on that person to rewrite the profile without them; only the
   stretches that change are sent again.
 - **An emoji name is shown as its picture on the person's page**, instead of "Unnamed contact"
   with the picture on a line below. A line says why, and where to give them a name in words.
 
 中文：
-- **语音消息不再当成消息**：微信在语音消息旁边显示秒数和声波图标，OCR 会把两者连在一起读成「3" ((」「4"(。」「2"(•」。这些被当成消息存下来后，档案就写成了你「爱用抽象表情和括号」。现在屏幕上和存档里都会去掉。装好后在那个人那里点一次「学习」，档案会重写，只有变了的段落会重新发送。
+- **语音消息不再当成消息**：微信在语音消息旁边显示秒数和声波图标，OCR 会把两者连在一起读成「3" ((」「4"(。」「2"(•」。这些被当成消息存下来后，档案会误以为你爱打奇怪的符号。现在屏幕上和存档里都会去掉。装好后在那个人那里点一次「学习」，档案会重写，只有变了的段落会重新发送。
 - **表情名字的人，页面标题直接显示那张图**，不再显示「未命名联系人」、再在下面一行放图。标题下面会说明原因，以及在哪里可以给 Ta 起个文字名字。
 
 ## 6.8.3
@@ -60,7 +102,7 @@ more for minutes: no telling a slow write from a stuck one, or whether to start 
   and its retries ever take) and the panel says it looks stuck. Learn then starts the write again,
   keeping the stretches already done; whatever the stuck one does afterwards is dropped.
 - **Quotes of mine are not theirs.** When they quote my message, WeChat puts 「my name：my words」
-  under theirs, and OCR often can't read my name (「A°😉：女大is no more」). A text like that whose
+  under theirs, and OCR often can't read my name. A text like that whose
   words are a message further up the screen is now left out, whoever's name is in front.
 
 中文：
@@ -72,7 +114,7 @@ more for minutes: no telling a slow write from a stuck one, or whether to start 
   写的过程中每 15 秒刷新一次；写的时候再点「学习」会直接显示进度。每段写完就计数，不会因为一段慢就一直不动。
 - **应用里也能看**：这个人的页面显示同样的进度，并自动刷新，写完后页面自动换成新档案；「人物」列表里会标出正在写档案的人。
 - **卡住会提示，点学习就能重来**：十分钟没有任何进展（比一次调用加上重试还久）会提示「好像卡住了」。这时再点「学习」会重新开始，已写好的段落不会重做，卡住的那次之后的结果会丢掉。
-- **引用我的话不再算成对方说的**：对方引用我的消息时，微信会在 Ta 的消息下面显示「我的名字：我的原话」，而 OCR 常常认不出我的名字（比如「A°😉：女大is no more」）。现在只要冒号后面的话和屏幕上方某条消息一样，不管前面是谁的名字，都不算消息。
+- **引用我的话不再算成对方说的**：对方引用我的消息时，微信会在 Ta 的消息下面显示「我的名字：我的原话」，而 OCR 常常认不出我的名字。现在只要冒号后面的话和屏幕上方某条消息一样，不管前面是谁的名字，都不算消息。
 
 ## 6.8.2
 
@@ -209,10 +251,9 @@ A model that reads no images gets the text alone when a screenshot would have go
 settings pages saved the default model as if you had chosen it, so a new default never reached
 you. Those saved defaults are cleared once, and a default is no longer saved at all.
 
-**The wrong picture for an emoji name.** A contact named 🍵 showed a picture of a notification
-("…improvements and QoL feat… vibecheck · Default") in place of their name. The name picture is
-cut from the chat's title bar, and a notification had slid over it at that moment; the first
-picture was kept for good.
+**The wrong picture for an emoji name.** A contact with an emoji name showed a picture of a
+notification in place of their name. The name picture is cut from the chat's title bar, and a
+notification had slid over it at that moment; the first picture was kept for good.
 - Nothing is cut from the title bar, or fingerprinted there, while a notification or our own card
   covers it.
 - A picture is kept only once two looks agree.
@@ -305,8 +346,8 @@ names sexual subtext plainly when it is on.
 - what sits in the title bar: the unread count on the back button, Soul's 加速.
 
 What older versions kept from that strip is dropped from saved histories.
-- A message of theirs that ended near the middle of the screen, next to their avatar
-  (「不是美女，有什么好看的」), was taken for a centred date divider and skipped. Centred now means
+- A message of theirs that ended near the middle of the screen, next to their avatar, was taken
+  for a centred date divider and skipped. Centred now means
   equally far from both edges.
 - Drafts are no longer the same three strategies in 30 characters (catch the feeling, a concrete
   plan, defuse it). The model is told whose turn it is. It first writes one line on the moment,
@@ -336,7 +377,7 @@ Errors like this one are now described in plain words.
   - 输入框及以下的一切（键盘推上去也一样）；
   - 标题栏里的字（返回键上的未读数、Soul 的「加速」）。
 - 旧版本存进聊天记录里的那排字会被清掉。
-- 靠着头像、结尾停在屏幕中间附近的对方消息（如「不是美女，有什么好看的」）以前会被当成居中的日期分隔线而漏掉，现在修好了。
+- 靠着头像、结尾停在屏幕中间附近的对方消息以前会被当成居中的日期分隔线而漏掉，现在修好了。
 - 回复不再是固定的三种套路。模型先知道轮到谁说话，写一句「判断」（显示在草稿上面），再给三条真的不一样、你真会发的话。
 - 最后一句是你说的时，给的是不施压的追发，或者直接建议先等等。
 - 深思和回复能看到最多 30 行上下文：学过的人会从存档里补上屏幕之前的记录。

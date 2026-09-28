@@ -1,6 +1,8 @@
 package dev.vibecheck
 
 import android.graphics.Bitmap
+import android.os.Handler
+import android.os.Looper
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
@@ -12,6 +14,8 @@ import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
  * run it: the failure then shows under Tools → Diagnostics.
  */
 object Ocr {
+
+    private val main by lazy { Handler(Looper.getMainLooper()) }
 
     private val recognizer by lazy {
         TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
@@ -26,9 +30,11 @@ object Ocr {
         val started = System.currentTimeMillis()
         val task = try {
             recognizer.process(InputImage.fromBitmap(bmp, 0))
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Crash.caught("ocr", e)
-            onResult(emptyList())
+            // On the main thread like every other result: the caller may be a capture's worker,
+            // and what [onResult] does (the card, the window, the verdicts) belongs to the main thread.
+            main.post { Crash.guard("ocr") { onResult(emptyList()) } }
             return
         }
         task.addOnSuccessListener { text ->

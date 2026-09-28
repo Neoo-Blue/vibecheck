@@ -43,17 +43,17 @@ class ArchiveTest {
     @Test fun examplesAreTheMostAlikeThenTheLatestInTimeOrder() {
         val lines = ArrayList<Pair<String, String>>()
         for (i in 1..40) { lines.add(t("今天天气第${i}天")); lines.add(m("嗯嗯$i")) }
-        lines.add(t("我不想出门，好累")); lines.add(m("那我陪你一起发臭发烂"))
+        lines.add(t("我不想出门，好累")); lines.add(m("那我陪你在家躺一天"))
         for (i in 41..50) { lines.add(t("随便聊聊$i")); lines.add(m("哈哈$i")) }
         val picked = Archive.examples(lines, "今天好累不想出门", k = 4)
         assertEquals(4, picked.size)
-        assertTrue("the alike one is in", picked.any { it.mine == "那我陪你一起发臭发烂" })
+        assertTrue("the alike one is in", picked.any { it.mine == "那我陪你在家躺一天" })
         assertTrue("topped up with the latest", picked.any { it.mine == "哈哈50" })
         val order = picked.map { e -> lines.indexOfFirst { it.second == e.mine } }
         assertEquals("in time order", order.sorted(), order)
         // What is on screen now is not shown back as the past.
-        val shown = Archive.examples(lines, "今天好累不想出门", k = 4, exclude = setOf("那我陪你一起发臭发烂"))
-        assertFalse(shown.any { it.mine == "那我陪你一起发臭发烂" })
+        val shown = Archive.examples(lines, "今天好累不想出门", k = 4, exclude = setOf("那我陪你在家躺一天"))
+        assertFalse(shown.any { it.mine == "那我陪你在家躺一天" })
     }
 
     @Test fun phrasesAreCountedNotGuessed() {
@@ -76,33 +76,33 @@ class ProfileTest {
 
     private val profile = """
         【Ta 是谁】
-        • 在上海做设计，养了一只叫麻辣烫的猫
-        【我们怎么相处】• 天天互怼，Ta 更主动
+        • 在杭州当老师，养了一只橘猫
+        【我们怎么相处】• 常一起吐槽工作，Ta 更主动
         【Ta 怎么说话】
-        • 爱说「笑死我了」，很少用表情
+        • 爱说「真的假的」，很少用表情
         【雷区】
-        • 别拿 Ta 的身高开玩笑
-        • 别在 Ta 加班时催
+        • 别拿 Ta 的工作开玩笑
+        • 别在 Ta 上课时催
         【Ta 难过时】
-        • 先陪着一起吐槽，别讲道理
+        • 先听 Ta 说完，别急着讲道理
         【我们的梗】
-        • 「发臭发烂」
+        • 「又来了」
     """.trimIndent()
 
     @Test fun sectionsAreReadWithHeadingsOnTheirOwnLineOrNot() {
         val s = Profile.sections(profile)
         assertEquals(listOf("who", "us", "their", "sore", "comfort", "jokes"), s.map { it.id })
-        assertEquals(listOf("• 天天互怼，Ta 更主动"), s[1].lines)
-        assertEquals("别拿 Ta 的身高开玩笑；别在 Ta 加班时催", s[3].text)
+        assertEquals(listOf("• 常一起吐槽工作，Ta 更主动"), s[1].lines)
+        assertEquals("别拿 Ta 的工作开玩笑；别在 Ta 上课时催", s[3].text)
         L.en = true
-        assertEquals("sore", Profile.sections("[Sore spots]\n• height jokes").single().id)
+        assertEquals("sore", Profile.sections("[Sore spots]\n• work jokes").single().id)
     }
 
     @Test fun theJudgeGetsTheBriefInPriorityOrder() {
         val b = Profile.brief(profile)
         assertTrue(b.startsWith("【我们怎么相处】"))
         assertTrue(b.indexOf("【雷区】") < b.indexOf("【Ta 是谁】"))
-        assertFalse("jokes are not for the judge", b.contains("发臭发烂"))
+        assertFalse("jokes are not for the judge", b.contains("又来了"))
         assertTrue(Profile.brief(profile, max = 60).length <= 60)
         // A profile from before sections goes as it is.
         assertEquals("• 对方是我的好友", Profile.brief("• 对方是我的好友"))
@@ -110,15 +110,15 @@ class ProfileTest {
 
     @Test fun theCardGetsTheOnePartThatFitsTheMoment() {
         fun dist(top: String) = Jev.Answer.Dist(top, mapOf(top to 0.8))
-        assertEquals("Ta 难过时：先陪着一起吐槽，别讲道理", Profile.hint(profile, mapOf("need" to dist("情绪安抚"))))
-        assertEquals("雷区：别拿 Ta 的身高开玩笑", Profile.hint(profile, mapOf("danger" to Jev.Answer.Scored(4.0, 6))))
-        assertEquals("我们的梗：「发臭发烂」", Profile.hint(profile, mapOf("intent" to dist("在开玩笑或一起感慨"))))
+        assertEquals("Ta 难过时：先听 Ta 说完，别急着讲道理", Profile.hint(profile, mapOf("need" to dist("情绪安抚"))))
+        assertEquals("雷区：别拿 Ta 的工作开玩笑", Profile.hint(profile, mapOf("danger" to Jev.Answer.Scored(4.0, 6))))
+        assertEquals("我们的梗：「又来了」", Profile.hint(profile, mapOf("intent" to dist("在开玩笑或一起感慨"))))
         assertNull(Profile.hint(profile, mapOf("intent" to dist("单纯想知道答案"))))
         assertNull(Profile.hint("• 老档案没有分段", mapOf("need" to dist("情绪安抚"))))
     }
 
     @Test fun notesSurviveSaveLoad() {
-        val notes = linkedMapOf("abc" to "【雷区】\n• 身高\\n不是换行", "def" to "一行")
+        val notes = linkedMapOf("abc" to "【雷区】\n• 工作\\n不是换行", "def" to "一行")
         assertEquals(notes, Profile.loadNotes(Profile.saveNotes(notes)))
     }
 
@@ -146,7 +146,7 @@ class CloseTest {
     }
 
     @Test fun anOldProfileGetsItsClosenessFromItsFirstLine() {
-        val old = "• 对方是我的好友或死党，关系亲密，彼此可以随意开玩笑、互怼。\n• 常聊日常"
+        val old = "• 对方是我的好友，关系亲密，说话很随便，常互相开玩笑。\n• 常聊工作"
         val p = Relationship.parse(old)
         assertEquals("朋友" to "很铁", p.rel to p.close)
         assertEquals(old, p.profile)

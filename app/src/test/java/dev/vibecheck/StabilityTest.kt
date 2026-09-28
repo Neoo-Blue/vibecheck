@@ -24,7 +24,7 @@ class StabilityTest {
     }
 
     @Test fun thePhotoUnderTheTitleBarIsNotTheName() {
-        // 5:04 in the 🍵 chat: grapes right under the title bar reach into the bottom of the strip.
+        // A photo right under the title bar reaches into the bottom of the strip.
         val w = 200
         val h = 40
         val px = strip(w, h)
@@ -98,5 +98,36 @@ class StabilityTest {
         after = true
         assertTrue(after)
         assertTrue(Diag.lastError.contains("bad input"))
+    }
+
+    private fun thrown(vararg frames: String, cause: Throwable? = null) = RuntimeException("boom", cause).apply {
+        stackTrace = frames.map { StackTraceElement(it.substringBeforeLast('.'), it.substringAfterLast('.'), null, 1) }.toTypedArray()
+    }
+
+    /** Below the loop that failed is always the loop that runs the guard, and ActivityThread.main. */
+    private val outerLoop = arrayOf(
+        "android.os.Looper.loop", "dev.vibecheck.Crash.loopGuarded", "android.os.Handler.handleCallback",
+        "android.os.Handler.dispatchMessage", "android.os.Looper.loopOnce", "android.os.Looper.loop", "android.app.ActivityThread.main",
+    )
+
+    @Test fun aTapOrAFrameThatThrowsIsCarriedOn() {
+        val tap = thrown("dev.vibecheck.OverlayCard.snap", "android.view.View.performClick", "android.os.Handler.dispatchMessage",
+            "android.os.Looper.loopOnce", *outerLoop)
+        assertFalse(Crash.lifecycle(tap))
+        val frame = thrown("dev.vibecheck.OverlayCard${'$'}Flow.onMeasure", "android.view.ViewRootImpl.performTraversals",
+            "android.view.Choreographer.doFrame", "android.os.Handler.handleCallback", "android.os.Looper.loopOnce", *outerLoop)
+        assertFalse(Crash.lifecycle(frame))
+    }
+
+    @Test fun aComponentThatFailsToStartStillEndsTheProcess() {
+        val create = thrown("dev.vibecheck.MainActivity.onCreate", "android.app.Activity.performCreate",
+            "android.app.ActivityThread.performLaunchActivity", "android.app.servertransaction.LaunchActivityItem.execute",
+            "android.app.ActivityThread${'$'}H.handleMessage", "android.os.Handler.dispatchMessage", "android.os.Looper.loopOnce", *outerLoop)
+        assertTrue(Crash.lifecycle(create))
+        // Android wraps a service's failure in its own, and the service's frames are the cause's.
+        val inService = thrown("dev.vibecheck.ChatReaderService.onServiceConnected", "android.os.Handler.dispatchMessage")
+        val wrapped = thrown("android.app.ActivityThread.handleCreateService", "android.os.Looper.loopOnce", *outerLoop, cause = inService)
+        assertTrue(Crash.lifecycle(wrapped))
+        assertTrue(Crash.lifecycle(thrown("java.lang.Object.wait", cause = create)))
     }
 }
