@@ -15,6 +15,7 @@ import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
 import android.os.Looper
+import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -497,6 +498,9 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         }
     }
 
+    /** The app's view tree took longer than [WALK_BUDGET_MS] to walk. */
+    private class SlowTree : Exception("the app's view tree answered too slowly")
+
     /** Depth-first walk of the window, keeping only nodes that look like chat bubbles. */
     private fun collect(root: AccessibilityNodeInfo): List<Chat.Bubble> {
         val bounds = Rect().also { root.getBoundsInScreen(it) }
@@ -520,7 +524,12 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         val stack = ArrayDeque<AccessibilityNodeInfo>()
         stack.addLast(root)
         var visited = 0
+        // Each node not yet cached is a call into the other app, which waits while that app is
+        // busy: past the budget, this read is dropped (and the screen read by OCR instead) rather
+        // than holding the main thread until Android calls us not responding.
+        val until = SystemClock.uptimeMillis() + WALK_BUDGET_MS
         while (stack.isNotEmpty() && visited < MAX_NODES) {
+            if (visited % 50 == 0 && SystemClock.uptimeMillis() > until) throw SlowTree()
             val n = stack.removeLast()
             visited++
             // Hidden views (and whatever is inside them) are not on screen: a hidden label in the
@@ -1148,7 +1157,9 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         val stack = ArrayDeque<AccessibilityNodeInfo>()
         stack.addLast(root)
         var visited = 0
+        val until = SystemClock.uptimeMillis() + WALK_BUDGET_MS   // see collect()
         while (stack.isNotEmpty() && visited < MAX_NODES) {
+            if (visited % 50 == 0 && SystemClock.uptimeMillis() > until) break
             val n = stack.removeLast()
             visited++
             if (n.isEditable) {
@@ -1420,8 +1431,17 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         learnScrolls = 0
         learnStale = 0
         // A history kept from a read that went all the way back only needs what came after it.
-        learnKept = if (people.archiveComplete(rec.own)) people.archive(rec.own).takeLast(Archive.MERGE_WINDOW) else emptyList()
-        Diag.log("learn: reading ${rec.name}'s history" + if (learnKept.isNotEmpty()) " (since the last read)" else "")
+        // Reading a long one takes a while: off the main thread, and in use from the page it lands on.
+        learnKept = emptyList()
+        val since = people.archiveComplete(rec.own)
+        if (since) {
+            val own = rec.own
+            profileIo.execute {
+                val kept = people.archive(own).takeLast(Archive.MERGE_WINDOW)
+                main.post { if (learning && learnOwn == own) learnKept = kept }
+            }
+        }
+        Diag.log("learn: reading ${rec.name}'s history" + if (since) " (since the last read)" else "")
         card.learning(0)
         learnStep()
     }
@@ -1502,17 +1522,45 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         main.removeCallbacks(learnWatchdog)
         main.removeCallbacks(learnNext)
         card.learning(null)
-        awake()
         val id = learnId
         val own = learnOwn
         val title = L.t("学习此人", "Learn this person")
         val read = ArrayList(learnHistory)
         Diag.log("learn: read ${read.size} ($end)")
+        // Joining the read onto a long kept history reads, checks and writes all of it: seconds,
+        // which on the main thread (where a tap that stopped the read waits) made Android close
+        // the app as not responding. Marked as writing meanwhile, so Learn is not started twice.
+        writing += id
+        awake()
+        profileIo.execute {
+            val r = runCatching { keep(id, own, read, end) }
+            main.post {
+                writing -= id
+                awake()
+                r.onFailure { e ->
+                    Crash.caught("learn", e)
+                    learnResult(id, title, listOf(L.t("没存上：${Judge.describe(e)}", "Could not keep it: ${Judge.describe(e)}")))
+                }.onSuccess { k -> afterKeep(id, title, read.size, k) }
+            }
+        }
+    }
 
-        // Joined onto what was kept. A read that reached the kept history adds what came since; a
-        // read that reached the first message is the whole history; anything else extends what
-        // was kept where the two line up, and is otherwise kept after it, marked incomplete so
-        // the next read goes all the way back.
+    /** A read joined onto what was kept, and what all of it says; see [keep]. */
+    private class Kept(
+        val size: Int,
+        val history: List<Pair<String, String>>,
+        val all: List<Pair<String, String>>,
+        val counts: Relation.Stats,
+        val style: Person.Style,
+    )
+
+    /**
+     * Blocking. The read joined onto what was kept, and saved. A read that reached the kept
+     * history adds what came since; a read that reached the first message is the whole history;
+     * anything else extends what was kept where the two line up, and is otherwise kept after
+     * it, marked incomplete so the next read goes all the way back. Too little is not saved.
+     */
+    private fun keep(id: String, own: String, read: List<Pair<String, String>>, end: LearnEnd): Kept {
         val kept = people.archive(own)
         val (history, complete) = when {
             kept.isEmpty() -> read to (end == LearnEnd.TOP)
@@ -1520,24 +1568,32 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             else -> Archive.merge(kept, read)?.let { it to (people.archiveComplete(own) || end == LearnEnd.TOP) }
                 ?: ((kept + read) to false)
         }
-        if (history.size < 4) {
-            learnResult(id, title, listOf(L.t("只读到 ${history.size} 条，不够写档案", "Only ${history.size} messages read, not enough for a profile")))
+        if (history.size < 4) return Kept(history.size, history, emptyList(), Relation.Stats(), Person.Style())
+        people.saveArchive(own, history, complete)
+        val all = people.archiveAll(id)
+        val counts = Relation.Stats().also { Relation.observeBulk(it, all) }
+        val style = Person.Style()
+        all.filter { it.first == "我" }.forEach { Person.observe(style, it.second) }
+        return Kept(history.size, history, all, counts, style)
+    }
+
+    /** On the main thread, once [keep] is done: the record takes in what was kept, then the profile is written. */
+    private fun afterKeep(id: String, title: String, readSize: Int, k: Kept) {
+        if (k.size < 4) {
+            learnResult(id, title, listOf(L.t("只读到 ${k.size} 条，不够写档案", "Only ${k.size} messages read, not enough for a profile")))
             return
         }
-        people.saveArchive(own, history, complete)
-
+        val history = k.history
+        val all = k.all
         // Reloaded: the record may have moved on since the read began.
         val rec = people.loadId(id)
-        val all = people.archiveAll(id)
         // A full read is the better baseline than what was seen live, so it replaces the counts
         // and my style rather than adding on top; less than the live count, and it does not.
         val stats = rec.stats
         if (all.size >= stats.theirMsgs + stats.myMsgs) {
-            stats.theirMsgs = 0; stats.myMsgs = 0; stats.theirChars = 0; stats.myChars = 0
-            Relation.observeBulk(stats, all)
-            val style = Person.Style()
-            all.filter { it.first == "我" }.forEach { Person.observe(style, it.second) }
-            rec.style = style
+            stats.theirMsgs = k.counts.theirMsgs; stats.myMsgs = k.counts.myMsgs
+            stats.theirChars = k.counts.theirChars; stats.myChars = k.counts.myChars
+            rec.style = k.style
         }
         // The read began at the newest screen: live counting carries on from there, not from the
         // top of the history the read ended on.
@@ -1547,11 +1603,11 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
 
         if (prefs.orKey.isBlank()) {
             learnResult(id, title, listOf(
-                L.t("读了 ${read.size} 条，存了 ${all.size} 条，统计已更新", "Read ${read.size}, kept ${all.size} messages, statistics updated"),
+                L.t("读了 $readSize 条，存了 ${all.size} 条，统计已更新", "Read $readSize, kept ${all.size} messages, statistics updated"),
                 L.t("填了 OpenRouter Key 才能写档案", "Add an OpenRouter key to get a profile")))
             return
         }
-        writeProfile(id, read.size, byUser = true)
+        writeProfile(id, readSize, byUser = true)
     }
 
     /**
@@ -1633,6 +1689,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         if (people.archiveCount(id) == 0) return L.t("手机上还没有和 Ta 的聊天记录：先在聊天里点一次「学习」", "No history with them on this phone yet: tap Learn in their chat once first")
         if (learning && learnId == id) return L.t("正在读 Ta 的聊天记录，读完会自己写档案", "Their history is being read; the profile follows by itself")
         val p = Learning.writing[id]
+        if (id in writing && p == null) return L.t("正在整理刚读到的记录，稍等一下", "Still putting the last read together; a moment")
         if (id in writing && p != null && !Learning.stalled(p, System.currentTimeMillis()))
             return L.t("已经在写了，进度就在这一页", "Already being written; the progress is on this page")
         // Not writing, or stuck: (again) from the top, the stuck one's late result dropped.
@@ -1797,6 +1854,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     // ---- learning about me ----
 
     private var dayChecked = ""
+    private var dayPruned = ""
     private var dayBusy = false
     private var dayRetryAt = 0L
     private var meBusy = false
@@ -1805,10 +1863,16 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     private fun checkDay() {
         val now = System.currentTimeMillis()
         val today = Me.day(now)
+        // Logs older than 90 days go whether or not they can be written up (no key) or are still
+        // being made (the switch off): 90 days is what the app says it keeps them.
+        if (today != dayPruned) {
+            dayPruned = today
+            meIo.execute { runCatching { me.prune() } }
+        }
         if (!prefs.aboutMe || today == dayChecked || dayBusy || now < dayRetryAt || prefs.orKey.isBlank()) return
         dayBusy = true
         meIo.execute {
-            val r = runCatching { me.prune(); meLearner.summarizeDays(today) }
+            val r = runCatching { meLearner.summarizeDays(today) }
             r.onSuccess { if (it > 0) Diag.log("me: $it day(s) written up") }.onFailure { Diag.log("me: day write-up failed ${it.message}") }
             main.post {
                 dayBusy = false
@@ -2150,8 +2214,10 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     override fun tree(): String = onMain {
         val root = rootFor(targetPkg) ?: rootInActiveWindow ?: return@onMain "no active window"
         val sb = StringBuilder("window=${root.packageName} class=${root.className}\n")
+        var nodes = 0
         fun walk(n: AccessibilityNodeInfo, depth: Int) {
-            if (depth > 25) return
+            // Capped like a scan: each node is a call into the other app, on the main thread.
+            if (depth > 25 || ++nodes > MAX_NODES) return
             val r = Rect().also { n.getBoundsInScreen(it) }
             sb.append("  ".repeat(depth))
                 .append(n.className?.toString()?.substringAfterLast('.'))
@@ -2278,6 +2344,8 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
 
         private const val DEBOUNCE_MS = 450L
         private const val MAX_NODES = 3000
+        /** The longest a walk of the watched app's view tree may hold the main thread. */
+        private const val WALK_BUDGET_MS = 2_000L
         /** A safety net, not a limit anyone should meet: the read ends at the first message. */
         private const val MAX_LEARN_PAGES = 5000
         /** Pages in a row with nothing new that mean the top of the history (or a long run of pictures). */

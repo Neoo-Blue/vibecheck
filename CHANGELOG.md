@@ -20,10 +20,17 @@ heading matches the tag.
   of how the app last ended is read when that was not normal: a crash in native code, "not
   responding", killed for memory or by the system. The next time you open the app, a banner says
   so, with a button that copies the details to send on. Tools → Diagnostics keeps them too.
-- **Fewer ways to crash.** Whatever goes wrong on the main thread, a tap on the card or a frame
-  being drawn included, is logged and the app carries on, instead of the service ending and
-  starting again. So are errors that are not exceptions, such as running out of memory on a
-  screenshot.
+- **Fewer ways to crash or freeze.**
+  - Whatever goes wrong on the main thread, a tap on the card or a frame being drawn included, is
+    logged and the app carries on, instead of the service ending and starting again. So are errors
+    that are not exceptions, such as running out of memory on a screenshot.
+  - Stopping a history read, and starting one for someone learned before, read and wrote the whole
+    kept history while the app could do nothing else: seconds for a long one, long enough for
+    Android to close the app as not responding. That now happens in the background.
+  - A chat app that is slow to describe its screen no longer holds Vibecheck up: after two seconds
+    the screen is read by OCR instead.
+  - With the LAN debug endpoint on, a browser hanging up mid-request no longer ends the service.
+- Day logs older than 90 days are deleted even without an OpenRouter key.
 
 中文：
 - **回复不再卡住**：模型在服务商那边排队时，OpenRouter 会一直发「还在处理」的信号，连接不会超时，面板就一直停在「思考中…」好几分钟，最后还是失败。现在：
@@ -32,7 +39,12 @@ heading matches the tag.
   - 正在写的回答不会因为慢被打断，回复最多等 2 分半，深思最多 5 分钟；
   - 回复不用再等深思或者上一次的回复写完才开始。
 - **记下为什么退出，并告诉你**：除了应用自己代码里的崩溃，现在也会读取 Android 记录的上次退出原因：原生代码崩溃、「应用无响应」、因为内存不足或被系统杀掉。下次打开应用时，最上面会提示，并有「复制原因」按钮，方便把详细记录发出来。「工具 → 诊断」里也能看到。
-- **更不容易闪退**：主线程上出的错（包括点卡片、画界面时出的错）会记下来并接着运行，不再让服务退出再重启。内存不足这类错误也一样，比如截图时内存不够。
+- **更不容易闪退、卡住**：
+  - 主线程上出的错（包括点卡片、画界面时出的错）会记下来并接着运行，不再让服务退出再重启。内存不足这类错误也一样，比如截图时内存不够；
+  - 停止读聊天记录、以及给学过的人再点学习时，以前要在前台把整份存档读一遍、写一遍，记录很长时要好几秒，Android 会以「应用无响应」把它关掉。现在都放到后台做；
+  - 聊天应用本身卡的时候，读屏幕超过两秒就放弃，改用截图识字，不再拖着 Vibecheck 一起卡；
+  - 打开局域网排查接口时，浏览器中途断开不会再让服务退出。
+- 没填 OpenRouter Key 时，超过 90 天的每日记录也会删除。
 
 ## 6.8.5
 

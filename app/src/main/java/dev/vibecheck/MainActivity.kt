@@ -664,8 +664,9 @@ class MainActivity : Activity() {
             if (n > 0) addView(buttons(L.t("总结今天", "Write up today") to { summarizeToday() }))
             for (d in me.days().filter { it != today }.take(30)) {
                 addView(text(Me.dayLabel(d), 14f, accent(), bold = true).apply { setPadding(0, dp(10), 0, dp(2)) })
-                addView(text(me.summary(d) ?: L.t("还没写小结（${me.lines(d).size} 条）", "Not written up yet (${me.lines(d).size} messages)"), 14f, fg())
-                    .apply { setTextIsSelectable(true) })
+                // Read once: both languages' texts are built, and the log is read for the count.
+                val summary = me.summary(d) ?: me.lines(d).size.let { c -> L.t("还没写小结（$c 条）", "Not written up yet ($c messages)") }
+                addView(text(summary, 14f, fg()).apply { setTextIsSelectable(true) })
             }
         })
 
@@ -1325,8 +1326,7 @@ class MainActivity : Activity() {
      * without opening the chat: only the stretches whose text changed, or everything.
      */
     private fun rewrite(id: String, kept: Int) {
-        val svc = ChatReaderService.running
-        if (svc == null) {
+        if (ChatReaderService.running == null) {
             toast(L.t("Vibecheck 的无障碍服务没开：先在「设置」里打开它", "Vibecheck's accessibility service is off: switch it on under Setup first"))
             return
         }
@@ -1337,14 +1337,20 @@ class MainActivity : Activity() {
                     "只更新变了的：内容没变的段落沿用以前的笔记，省钱。\n全部重做：每一段都重新整理，适合换了模型以后，花费多一些。",
                 "Write their profile again from the $kept messages kept on this phone, without opening the chat. The progress shows on this page, and the screen stays on while it runs.\n\n" +
                     "Only what changed: stretches whose text is the same keep their notes, which costs less.\nEverything: every stretch is noted again, for after a model change; it costs more."))
-            .setPositiveButton(L.t("只更新变了的", "Only what changed")) { _, _ -> startRewrite(svc, id, fresh = false) }
-            .setNeutralButton(L.t("全部重做", "Everything")) { _, _ -> startRewrite(svc, id, fresh = true) }
+            .setPositiveButton(L.t("只更新变了的", "Only what changed")) { _, _ -> startRewrite(id, fresh = false) }
+            .setNeutralButton(L.t("全部重做", "Everything")) { _, _ -> startRewrite(id, fresh = true) }
             .setNegativeButton(L.t("取消", "Cancel"), null)
             .show()
     }
 
-    private fun startRewrite(svc: ChatReaderService, id: String, fresh: Boolean) {
-        val why = svc.rewriteFromKept(id, fresh)
+    private fun startRewrite(id: String, fresh: Boolean) {
+        // Looked up again: the service may have stopped (or started anew) while the dialog was open.
+        val svc = ChatReaderService.running
+        if (svc == null) {
+            toast(L.t("Vibecheck 的无障碍服务没开：先在「设置」里打开它", "Vibecheck's accessibility service is off: switch it on under Setup first"))
+            return
+        }
+        val why = runCatching { svc.rewriteFromKept(id, fresh) }.getOrElse { L.t("没能开始：${it.message}", "Could not start: ${it.message}") }
         if (why != null) { toast(why); return }
         toast(L.t("开始重新分析，进度在这一页", "Rewriting; the progress is on this page"))
         showPerson(id)
