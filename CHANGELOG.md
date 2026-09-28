@@ -4,6 +4,36 @@ APKs for every version are on the [releases page](https://github.com/Neoo-Blue/v
 Each section below is also that release's notes: the Release workflow publishes the section whose
 heading matches the tag.
 
+## 6.8.9
+
+- **Two people with emoji names are no longer taken for each other.**
+  - The old way: with none of their messages on screen (only yours, so no avatar), a chat whose
+    name is an emoji was found by a fingerprint of the middle of the title bar.
+    - Every emoji name is one shape in the middle of a plain bar, so they all gave that
+      fingerprint the same bits, and the chat went to whoever had been seen last.
+    - While it did, that person's name picture was replaced with the other chat's, and the two
+      names seemed to swap.
+  - The picture of the name itself decides now, by where its coloured parts are and what colour
+    they are. Light and dark mode leave both alone.
+    - It counts only when it matches one person's kept picture.
+    - Otherwise the chat stays with the one you were in, if the messages on screen carry on from
+      it. Failing that, nobody is guessed.
+  - The old title-bar links are removed, and so are the kept name pictures, which may be the
+    other person's. Each is taken again the next time you are in that chat with their messages in
+    sight. Until then that person shows as "Unnamed contact".
+- **Avatars are told apart by colour.**
+  - The old fingerprint of an avatar was 15 bits: which block was brighter than the next. On
+    photo-like test pictures, one pair in eight of different avatars came within its tolerance.
+  - The new one is the colours of 16 blocks inside the avatar. Read a few pixels off, the same
+    avatar moved by at most 8; no two different ones came within 15.
+  - People seen before are found once more by the old fingerprints, the first time after the
+    update, and the new one is remembered for them.
+- **No more automatic merges.**
+  - Until now, two records were merged when their name pictures looked alike by colour, or when
+    two fingerprints of one chat pointed to different records.
+  - A wrong merge mixes two people's memories for good, so the app no longer merges by itself.
+    You can still merge on the person's page.
+
 ## 6.8.8
 
 - **Far fewer tokens for the same answers.**

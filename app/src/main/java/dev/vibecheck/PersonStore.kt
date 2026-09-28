@@ -216,10 +216,16 @@ class PersonStore(ctx: Context) {
 
     private fun pictureFile(id: String) = File(pictureDir, Archive.hash(canonical(id)) + ".png")
 
-    /** The picture of an unreadable name, or null. Only for people with no name in words. */
-    fun namePicture(id: String): Bitmap? {
+    /** The picture of an unreadable name, to show, or null. Only for people with no name in words. */
+    fun namePicture(id: String): Bitmap? = if (aliasOf(id).isNotBlank()) null else pictureOf(id)
+
+    /**
+     * The picture of an unreadable name as kept, also for someone named from a notification: it
+     * is how their chat is found when none of their messages is on screen.
+     */
+    fun pictureOf(id: String): Bitmap? {
         val c = canonical(id)
-        if (aliasOf(c).isNotBlank() || !Person.isFingerprint(nameOf(c))) return null
+        if (!Person.isFingerprint(nameOf(c))) return null
         // Replaced or deleted by the other process (service or app) since it was read: read again.
         val stamp = pictureFile(c).lastModified()
         if (stamp == 0L) { pictures.remove(c); return null }
@@ -233,6 +239,18 @@ class PersonStore(ctx: Context) {
         pictures[c] = stamp to picture
         return picture
     }
+
+    /** Person.emojiPrint of [pictureOf], worked out once per picture. */
+    fun namePrint(id: String): IntArray? {
+        val c = canonical(id)
+        val picture = pictureOf(c) ?: return null
+        prints[c]?.takeIf { it.first === picture }?.let { return it.second }
+        val px = IntArray(picture.width * picture.height)
+        picture.getPixels(px, 0, picture.width, 0, 0, picture.width, picture.height)
+        return Person.emojiPrint(px, picture.width, picture.height).also { prints[c] = picture to it }
+    }
+
+    private val prints = HashMap<String, Pair<Bitmap, IntArray?>>()
 
     fun hasNamePicture(id: String): Boolean = pictureFile(id).exists()
 
@@ -293,24 +311,37 @@ class PersonStore(ctx: Context) {
         (sp.getString("plinks:$pkg", "") ?: "").lineSequence()
             .mapNotNull { l -> l.split('\t').takeIf { it.size == 2 }?.let { it[0] to it[1] } }.toList()
 
-    /** The inside of an avatar ([Person.insideHash]) remembered against the person it belongs to. */
+    /**
+     * The inside of an avatar ([Person.avatarHash], or [Person.insideHash] before it) remembered
+     * against the person it belongs to.
+     */
     fun rememberPrint(pkg: String, hash: String, name: String) {
         val links = printLinks(pkg)
         // A bit of wobble on an avatar already remembered for them is not worth rewriting the store.
-        if (links.any { it.second == name && Person.hamming(it.first, hash) <= 1 }) return
-        val kept = (links.filter { it.first != hash } + (hash to name)).takeLast(200)
+        val wobble = if (Person.isAvatarHash(hash)) Person.AVATAR_SAME / 2 else 1
+        if (links.any { it.second == name && Person.distance(it.first, hash) <= wobble }) return
+        val kept = (links.filter { it.first != hash } + (hash to name)).takeLast(300)
         sp.edit().putString("plinks:$pkg", kept.joinToString("\n") { "${it.first}\t${it.second}" }).apply()
     }
 
+    /** [name] has been seen with an avatar fingerprint of the newest kind ([Person.avatarHash]), or is named by one. */
+    fun hasAvatarPrint(pkg: String, name: String): Boolean {
+        val c = canonical("$pkg|$name")
+        if (Person.isAvatarHash(c.substringAfter('|'))) return true
+        return printLinks(pkg).any { Person.isAvatarHash(it.first) && canonical("$pkg|${it.second}") == c }
+    }
+
     /**
-     * Whose avatar this is by its inside, and how many bits off: from the remembered links, and
-     * from people named by such a fingerprint in the first place. The one they were merged into,
-     * if they were.
+     * Whose avatar this is by its inside, and how far off ([Person.distance]): from the
+     * remembered links, and from people named by such a fingerprint in the first place. The one
+     * they were merged into, if they were. Only fingerprints of the same kind as [hash] can be
+     * near it.
      */
     fun printOwner(pkg: String, hash: String, maxDist: Int = 3): Pair<String, Int>? {
-        val named = fingerprintIds(pkg).map { it.substringAfter('|') }.filter { Person.isInsideHash(it) }.map { it to it }
+        val named = fingerprintIds(pkg).map { it.substringAfter('|') }
+            .filter { Person.isInsideHash(it) || Person.isAvatarHash(it) }.map { it to it }
         return (printLinks(pkg) + named)
-            .map { (h, name) -> name to Person.hamming(h, hash) }
+            .map { (h, name) -> name to Person.distance(h, hash) }
             .filter { it.second <= maxDist }
             .minByOrNull { it.second }
             ?.let { (name, d) -> canonical("$pkg|$name").substringAfter('|') to d }
@@ -417,25 +448,24 @@ class PersonStore(ctx: Context) {
 
     // ---- chats whose name cannot be read ----
 
-    private fun titleLinks(pkg: String): List<Pair<String, String>> =
-        (sp.getString("tlinks:$pkg", "") ?: "").lineSequence()
-            .mapNotNull { l -> l.split('\t').takeIf { it.size == 2 }?.let { it[0] to it[1] } }.toList()
-
     /**
-     * The title bar of a chat whose name cannot be read, remembered against the avatar that
-     * identifies it, so a screen with only my own messages (no avatar in sight) still finds them.
+     * Up to 6.8.8 a chat with none of their messages on screen was found by a fingerprint of
+     * the title bar's middle. Every emoji name, one bright or dark shape in the middle of a plain
+     * bar, gave that fingerprint the same few bits, so the chat went to whoever had been seen
+     * last; while it did, that person's name picture was replaced with the other chat's. Those
+     * links go, and so do the kept name pictures, which may be the wrong person's: each is taken
+     * again from the next looks at its chat with their messages in sight.
      */
-    fun rememberTitle(pkg: String, titleHash: String, name: String) {
-        if (titleOwner(pkg, titleHash) == name) return
-        val links = (titleLinks(pkg).filter { it.first != titleHash } + (titleHash to name)).takeLast(200)
-        sp.edit().putString("tlinks:$pkg", links.joinToString("\n") { "${it.first}\t${it.second}" }).apply()
+    private fun forgetTitleLinks() {
+        if (sp.getInt("namesv", 0) >= 2) return
+        val e = sp.edit()
+        for (k in sp.all.keys) if (k.startsWith("tlinks:")) e.remove(k)
+        e.putInt("namesv", 2).apply()
+        runCatching { pictureDir.listFiles()?.forEach { it.delete() } }
+        pictures.clear()
     }
 
-    /** Whose avatar a title bar was seen with, allowing a couple of bits of rendering wobble. */
-    fun titleOwner(pkg: String, titleHash: String, maxDist: Int = 2): String? =
-        titleLinks(pkg).map { it to Person.hamming(it.first, titleHash) }
-            .filter { it.second <= maxDist }
-            .minByOrNull { it.second }?.first?.second
+    init { forgetTitleLinks() }
 
     /** One row per person for the settings screen, most recently seen first. */
     /**

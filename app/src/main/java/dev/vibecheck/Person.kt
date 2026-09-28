@@ -272,38 +272,95 @@ object Person {
         a.size == b.size && a.isNotEmpty() && a.indices.sumOf { kotlin.math.abs(a[it] - b[it]) } / a.size <= 14
 
     /**
-     * A picture of a name by its colours alone: per block, the share of warm (red to yellow)
-     * and of cool (green to purple) coloured pixels. The title bar's background is grey in light
-     * and in dark mode, and so are the white and black parts of an emoji: what is left is the
-     * same in both. Null when there is too little colour to go on (a grey emoji, text).
+     * A picture of a name (an emoji) by what light and dark mode leave alone: where its coloured
+     * pixels are and what colour they are, on a [EMOJI_GRID] x [EMOJI_GRID] grid laid over the
+     * coloured part. The title bar is grey in both modes, and so are the white and black parts of
+     * an emoji, which is why those are left out; and the grid is laid over the coloured part
+     * rather than the whole picture, because where the picture is cut depends on the mode (white
+     * next to a light bar does not stand out). Per cell: the share of coloured pixels, then their
+     * mean red, green and blue. Null with too little colour to go on (a grey emoji, text).
      */
-    fun colourSignature(px: IntArray, w: Int, h: Int, cols: Int = 12, rows: Int = 3): IntArray? {
+    fun emojiPrint(px: IntArray, w: Int, h: Int): IntArray? {
         if (w <= 0 || h <= 0 || px.size < w * h) return null
-        val warm = IntArray(cols * rows)
-        val cool = IntArray(cols * rows)
-        val n = IntArray(cols * rows)
-        var coloured = 0
+        var x0 = w; var y0 = h; var x1 = -1; var y1 = -1
+        var count = 0
         for (y in 0 until h) for (x in 0 until w) {
-            val p = px[y * w + x]
-            val r = (p shr 16) and 0xFF
-            val g = (p shr 8) and 0xFF
-            val b = p and 0xFF
-            val i = (y * rows / h) * cols + (x * cols / w)
-            n[i]++
-            if (maxOf(r, g, b) - minOf(r, g, b) <= 48) continue
-            coloured++
-            if (r >= g && r >= b) warm[i]++ else cool[i]++
+            if (!coloured(px[y * w + x])) continue
+            count++
+            x0 = minOf(x0, x); y0 = minOf(y0, y); x1 = maxOf(x1, x); y1 = maxOf(y1, y)
         }
-        if (coloured * 33 < w * h) return null
-        return IntArray(cols * rows * 2) { k ->
-            val i = k % (cols * rows)
-            if (n[i] == 0) 0 else (if (k < cols * rows) warm[i] else cool[i]) * 255 / n[i]
+        if (count * 33 < w * h || x1 - x0 < 4 || y1 - y0 < 4) return null
+        val g = EMOJI_GRID
+        val bw = x1 - x0 + 1
+        val bh = y1 - y0 + 1
+        val all = IntArray(g * g)
+        val n = IntArray(g * g)
+        val sum = LongArray(g * g * 3)
+        for (y in y0..y1) for (x in x0..x1) {
+            val i = ((y - y0) * g / bh) * g + (x - x0) * g / bw
+            all[i]++
+            val p = px[y * w + x]
+            if (!coloured(p)) continue
+            n[i]++
+            sum[i * 3] += (p shr 16) and 0xFF
+            sum[i * 3 + 1] += (p shr 8) and 0xFF
+            sum[i * 3 + 2] += p and 0xFF
+        }
+        return IntArray(g * g * 4) { k ->
+            val i = k / 4
+            when (k % 4) {
+                0 -> if (all[i] == 0) 0 else n[i] * 255 / all[i]
+                else -> if (n[i] == 0) 0 else (sum[i * 3 + k % 4 - 1] / n[i]).toInt()
+            }
         }
     }
 
-    /** Two names' pictures with the same colours in the same places: see [colourSignature]. */
-    fun sameColours(a: IntArray, b: IntArray): Boolean =
-        a.size == b.size && a.isNotEmpty() && a.indices.sumOf { kotlin.math.abs(a[it] - b[it]) } / a.size <= 12
+    private fun coloured(p: Int): Boolean {
+        val r = (p shr 16) and 0xFF
+        val g = (p shr 8) and 0xFF
+        val b = p and 0xFF
+        return maxOf(r, g, b) - minOf(r, g, b) > 48
+    }
+
+    private const val EMOJI_GRID = 6
+
+    /**
+     * How far apart two [emojiPrint]s are, 0 to 255: per cell, how differently much of it is
+     * coloured, plus, where both are, how different the colours are.
+     */
+    fun emojiDistance(a: IntArray, b: IntArray): Int {
+        if (a.size != b.size || a.isEmpty() || a.size % 4 != 0) return Int.MAX_VALUE
+        var sum = 0L
+        val cells = a.size / 4
+        for (i in 0 until cells) {
+            val ca = a[i * 4]
+            val cb = b[i * 4]
+            var d = kotlin.math.abs(ca - cb)
+            if (ca >= 32 && cb >= 32) d += (1..3).sumOf { kotlin.math.abs(a[i * 4 + it] - b[i * 4 + it]) } / 3
+            sum += d
+        }
+        return (sum / cells).toInt()
+    }
+
+    /** The same emoji: [emojiDistance] within [EMOJI_SAME]. */
+    fun sameEmoji(a: IntArray, b: IntArray): Boolean = emojiDistance(a, b) <= EMOJI_SAME
+
+    const val EMOJI_SAME = 20
+
+    /**
+     * Whose name this picture is, among [kept] (each person's kept picture, as an [emojiPrint]):
+     * the one person it matches, or [current] if theirs is one of the matches (scrolling in their
+     * chat). Two others alike, or none: nobody. The title bar is all there is to go on when none
+     * of their messages is on screen, and a wrong guess files the chat under someone else.
+     */
+    fun pictureOwner(seen: IntArray, kept: List<Pair<String, IntArray>>, current: String? = null): String? {
+        val alike = kept.filter { sameEmoji(seen, it.second) }.map { it.first }.distinct()
+        return when {
+            current != null && current in alike -> current
+            alike.size == 1 -> alike[0]
+            else -> null
+        }
+    }
 
     /** Pictures of one person's name seen lately that did not match the kept one. */
     class PictureVotes {
@@ -351,16 +408,63 @@ object Person {
     /**
      * How many bits two fingerprints disagree on. A rendering wobble flips a couple; a different
      * avatar flips most. This is what lets one contact stay one contact across scans, instead of
-     * every scan minting a fresh person (the phone had 277 of them). Fingerprints of the two
-     * kinds ([insideHash] and the older [hashOf]) are never alike: they are of different regions.
+     * every scan minting a fresh person (the phone had 277 of them). Fingerprints of different
+     * kinds ([avatarHash], [insideHash], the older [hashOf]) are never alike: they are of
+     * different regions, or grids.
      */
     fun hamming(a: String, b: String): Int {
+        if (isAvatarHash(a) || isAvatarHash(b)) return Int.MAX_VALUE
         val va = a.startsWith(INSIDE)
         if (va != b.startsWith(INSIDE)) return Int.MAX_VALUE
         val x = a.removePrefix(if (va) INSIDE else "#").toLongOrNull(16) ?: return Int.MAX_VALUE
         val y = b.removePrefix(if (va) INSIDE else "#").toLongOrNull(16) ?: return Int.MAX_VALUE
         return java.lang.Long.bitCount(x xor y)
     }
+
+    /**
+     * The fingerprint of the inside of an avatar: the mean colour of each block of a 4 x 4 grid
+     * ([rgb]: the 16 reds, then the greens, then the blues). The fingerprints before it kept 15
+     * bits of which block was brighter than the next, in grey: read a few pixels off, the same
+     * avatar lost up to 4 of them, one more than allowed, while one pair in eight of different
+     * photo-like avatars came within the 3 allowed. The colours of the blocks moved by at most 8
+     * (of 255) for the same avatar read 4 pixels off, and no two different ones came within 15.
+     * "" for a region with nothing in it: a wall of one colour is nobody's face.
+     */
+    fun avatarHash(rgb: IntArray): String {
+        if (rgb.size != AVATAR_VALUES || rgb.any { it !in 0..255 }) return ""
+        val grey = IntArray(16) { (rgb[it] * 30 + rgb[16 + it] * 59 + rgb[32 + it] * 11) / 100 }
+        if (grey.max() - grey.min() <= 6) return ""
+        return AVATAR + rgb.joinToString("") { "%02x".format(it) }
+    }
+
+    /** How far apart two [avatarHash]es are: the mean difference of their colours, 0 to 255. */
+    fun avatarDistance(a: String, b: String): Int {
+        val x = avatarValues(a) ?: return Int.MAX_VALUE
+        val y = avatarValues(b) ?: return Int.MAX_VALUE
+        return x.indices.sumOf { kotlin.math.abs(x[it] - y[it]) } / x.size
+    }
+
+    private fun avatarValues(s: String): IntArray? {
+        if (!isAvatarHash(s) || s.length != AVATAR.length + AVATAR_VALUES * 2) return null
+        val out = IntArray(AVATAR_VALUES)
+        for (i in out.indices) out[i] = s.substring(AVATAR.length + i * 2, AVATAR.length + i * 2 + 2).toIntOrNull(16) ?: return null
+        return out
+    }
+
+    fun isAvatarHash(name: String) = name.startsWith(AVATAR)
+
+    /** How far one look at an avatar may land from another and still be the same avatar ([avatarDistance]). */
+    const val AVATAR_SAME = 12
+
+    /**
+     * How far apart two fingerprints are, in their own measure: [avatarDistance] for the newest
+     * kind, [hamming] bits for the older ones. Different kinds are never near.
+     */
+    fun distance(a: String, b: String): Int =
+        if (isAvatarHash(a) || isAvatarHash(b)) avatarDistance(a, b) else hamming(a, b)
+
+    private const val AVATAR = "#v3"
+    private const val AVATAR_VALUES = 48
 
     /**
      * The fingerprint of the inside of an avatar, a picture light and dark mode leave as it is.
