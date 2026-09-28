@@ -77,7 +77,16 @@ class OverlayCard(
      * A titled panel under the judgment: the deep read, reply drafts, a learned profile. [read]
      * is the one-line read of the moment shown above reply drafts, not a draft itself.
      */
-    class Section(val title: String, val lines: List<String>, val pickable: Boolean = false, val read: String? = null)
+    class Section(
+        val title: String,
+        val lines: List<String>,
+        val pickable: Boolean = false,
+        val read: String? = null,
+        /** A small line under it all: which model answered when the first one failed. */
+        val note: String? = null,
+    ) {
+        fun withNote(n: String?): Section = if (n == null) this else Section(title, lines, pickable, read, n)
+    }
 
     private val wm = svc.getSystemService(WindowManager::class.java)
     private val main = Crash.mainHandler()
@@ -655,6 +664,7 @@ class OverlayCard(
             addView(tv)
         }
         if (sec.pickable) addView(line(L.t("点一条填进输入框，长按复制", "Tap one to put it in the reply box · long-press to copy"), 10f * s, p.header, 0))
+        sec.note?.let { addView(line(it, 10f * s, p.header, 0).apply { setPadding(0, dp(3), 0, 0) }) }
     }
 
     private fun params(w: Int, x: Int, y: Int, h: Int = WindowManager.LayoutParams.WRAP_CONTENT) =

@@ -82,13 +82,26 @@ class MeLearner(private val me: MeStore, private val people: PersonStore, privat
         return text
     }
 
+    /** The Think model, and when it still fails after its retries, the other model set (see [Models.backup]). */
     private fun ask(system: String, prompt: String, tokens: Int): String {
+        val model = prefs.deepModel
+        return try {
+            once(model, system, prompt, tokens)
+        } catch (e: Exception) {
+            val backup = Models.backup(model, prefs.fastModel, prefs.deepModel)
+            if (backup == null || !OpenRouter.worthAnotherModel(e)) throw e
+            Diag.log("me: $model failed (${Judge.describe(e)}); asking $backup")
+            once(backup, system, prompt, tokens)
+        }
+    }
+
+    private fun once(model: String, system: String, prompt: String, tokens: Int): String {
         var wait = 5_000L
         var tries = 0
         while (true) {
             prefs.countUse(Prefs.USE_BIO)
             try {
-                return OpenRouter.chat(prefs.orKey, prefs.deepModel, system, prompt, null, maxTokens = tokens, timeoutMs = 180_000, temperature = 0.4)
+                return OpenRouter.chat(prefs.orKey, model, system, prompt, null, maxTokens = tokens, timeoutMs = 180_000, temperature = 0.4)
             } catch (e: Exception) {
                 if (++tries >= 3 || !Judge.isTransient(e)) throw e
                 Thread.sleep(wait)

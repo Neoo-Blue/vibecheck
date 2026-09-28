@@ -43,4 +43,26 @@ object Models {
 
     /** The option a model id is, or null for one typed in by hand. */
     fun option(list: List<Option>, id: String): Option? = list.firstOrNull { it.id == id.trim() }
+
+    /** "Kimi K2.6" for a model offered here, the id itself for one typed in. */
+    fun nameOf(id: String): String = option(REPLY + DEEP, id)?.name ?: id.trim()
+
+    /** Asked when both models set are the same one and it fails: quick, cheap, and it writes adult replies too. */
+    const val FALLBACK = "deepseek/deepseek-v4.1-flash"
+
+    /**
+     * The model to ask when [primary] fails: the other one set in Setup (replies and Think stand in
+     * for each other), or when both are the same, [FALLBACK], or the default reply model when
+     * that is the one failing. Null only when there is nothing else left to try.
+     */
+    fun backup(primary: String, fast: String, deep: String): String? {
+        val p = primary.trim()
+        val other = (if (p == fast.trim()) deep else fast).trim()
+        return when {
+            other.isNotEmpty() && other != p -> other
+            p != FALLBACK -> FALLBACK
+            p != Prefs.DEFAULT_FAST -> Prefs.DEFAULT_FAST
+            else -> null
+        }
+    }
 }

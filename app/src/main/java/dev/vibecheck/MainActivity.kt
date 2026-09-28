@@ -24,6 +24,7 @@ import android.text.style.ImageSpan
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
+import android.view.WindowManager
 import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
@@ -263,6 +264,8 @@ class MainActivity : Activity() {
                 L.t("测试回复模型", "Test reply model") to { testModel(deep = false) },
                 L.t("测试深思模型", "Test Think model") to { testModel(deep = true) },
             ))
+            addView(hint(L.t("两个模型互为备用：一个出错（忙、挂了、拒绝回答、半路断了），会自动换另一个再问一次，卡片上会注明是谁回答的。两个选同一个时，备用的是 DeepSeek V4.1 Flash。",
+                "Each model stands in for the other: when one fails (busy, down, refusing, cut off), the other is asked the same, and the card says which answered. With both set to one model, DeepSeek V4.1 Flash stands in.")))
         })
 
         addView(tile(null, L.t("在这些应用里解读", "Watch these apps"), L.t(
@@ -527,7 +530,7 @@ class MainActivity : Activity() {
             val v = progressView ?: return
             val id = personShown ?: return
             val p = Learning.writing[id]
-            if (p == null) { progressView = null; showPerson(id); return }
+            if (p == null) { progressView = null; keepScreenOn(false); showPerson(id); return }
             v.text = Learning.lines(p, System.currentTimeMillis()).joinToString("\n")
             main.postDelayed(this, PROGRESS_TICK_MS)
         }
@@ -541,6 +544,7 @@ class MainActivity : Activity() {
     private fun showPeople(query: String = "") {
         personShown = null
         progressView = null
+        keepScreenOn(false)
         peoplePage.removeAllViews()
         peoplePage.addView(buildPeople(query))
     }
@@ -559,6 +563,7 @@ class MainActivity : Activity() {
         saveFields()
         personShown = ME_PAGE
         progressView = null
+        keepScreenOn(false)
         peoplePage.removeAllViews()
         peoplePage.addView(buildMe())
         peoplePage.post { peoplePage.scrollTo(0, 0) }
@@ -785,6 +790,10 @@ class MainActivity : Activity() {
                 main.removeCallbacks(progressTick)
                 main.postDelayed(progressTick, PROGRESS_TICK_MS)
             }
+            keepScreenOn(Learning.writing.containsKey(id))
+            val kept = people.archiveCount(id)
+            if (kept > 0 && !Learning.writing.containsKey(id)) addView(buttons(
+                L.t("用存的 $kept 条记录重新分析", "Rewrite from the $kept kept messages") to { rewrite(id, kept) }))
             val secs = Profile.sections(r.bio)
             if (secs.isEmpty()) addView(text(L.t("还没学习：在和 Ta 的聊天里打开卡片，点「学习」。应用会自己翻完你们的聊天记录，写一份档案。",
                 "Not learned yet: open the card in your chat with them and tap Learn. It reads your whole history and writes a profile."), 14f, fg()))
@@ -1269,6 +1278,45 @@ class MainActivity : Activity() {
         override fun generateLayoutParams(p: LayoutParams?): LayoutParams = MarginLayoutParams(p)
         override fun checkLayoutParams(p: LayoutParams?) = p is MarginLayoutParams
         override fun generateDefaultLayoutParams(): LayoutParams = MarginLayoutParams(WRAP_CONTENT, WRAP_CONTENT)
+    }
+
+    /**
+     * Writes [id]'s profile again from the history kept on the phone, through the running service,
+     * without opening the chat: only the stretches whose text changed, or everything.
+     */
+    private fun rewrite(id: String, kept: Int) {
+        val svc = ChatReaderService.running
+        if (svc == null) {
+            toast(L.t("Vibecheck 的无障碍服务没开：先在「设置」里打开它", "Vibecheck's accessibility service is off: switch it on under Setup first"))
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle(L.t("重新分析", "Rewrite the profile"))
+            .setMessage(L.t(
+                "用手机上存的 $kept 条聊天记录重新写 Ta 的档案，不用打开聊天。写的时候这一页显示进度，屏幕保持常亮。\n\n" +
+                    "只更新变了的：内容没变的段落沿用以前的笔记，省钱。\n全部重做：每一段都重新整理，适合换了模型以后，花费多一些。",
+                "Write their profile again from the $kept messages kept on this phone, without opening the chat. The progress shows on this page, and the screen stays on while it runs.\n\n" +
+                    "Only what changed: stretches whose text is the same keep their notes, which costs less.\nEverything: every stretch is noted again, for after a model change; it costs more."))
+            .setPositiveButton(L.t("只更新变了的", "Only what changed")) { _, _ -> startRewrite(svc, id, fresh = false) }
+            .setNeutralButton(L.t("全部重做", "Everything")) { _, _ -> startRewrite(svc, id, fresh = true) }
+            .setNegativeButton(L.t("取消", "Cancel"), null)
+            .show()
+    }
+
+    private fun startRewrite(svc: ChatReaderService, id: String, fresh: Boolean) {
+        val why = svc.rewriteFromKept(id, fresh)
+        if (why != null) { toast(why); return }
+        toast(L.t("开始重新分析，进度在这一页", "Rewriting; the progress is on this page"))
+        showPerson(id)
+    }
+
+    /**
+     * While a profile is written from this page the screen stays on: once it goes off Android
+     * takes the network away, and the write would stop halfway.
+     */
+    private fun keepScreenOn(on: Boolean) {
+        if (on) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 
     private fun confirm(message: String, action: String, onYes: () -> Unit) {

@@ -186,6 +186,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     override fun onServiceConnected() {
         Crash.install(this)
         Learning.writing.clear()
+        running = this
         prefs = Prefs(this)
         prefs.lang   // applies the UI language to L
         people = PersonStore(this)
@@ -350,6 +351,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     override fun onDestroy() {
         Diag.connected = false
         Learning.writing.clear()
+        if (running === this) running = null
         learning = false
         main.removeCallbacksAndMessages(null)
         if (::prefs.isInitialized) prefs.unlisten(prefListener)
@@ -1191,23 +1193,51 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         val think = if (kind == REPLY) OpenRouter.Think.OFF else OpenRouter.Think.LOW
         val send = { image: String? ->
             val model = if (kind == REPLY || image != null) prefs.fastModel else prefs.deepModel
+            // The other model set in Setup stands in when this one fails (see Models.backup).
+            val backup = Models.backup(model, prefs.fastModel, prefs.deepModel)
+            // A deep read thinks first, and the thinking counts against the answer's room: 2,500
+            // tokens could all go on it and leave "the model stopped before answering".
+            val tokens = if (kind == REPLY) 2500 else 4000
             deepIo.execute {
                 // Whatever goes wrong, building the prompt included, ends up on the card as a
                 // failure: the panel must never be left saying "Thinking…".
                 val built = runCatching { deepPromptFor(kind, v, image != null) }
                 val started = System.currentTimeMillis()
-                // Each finished line goes on the card while the model writes the next.
-                val ask = { pic: String?, text: String ->
-                    OpenRouter.chat(prefs.orKey, model, system, text, pic, think = think,
-                        onLine = { line -> main.post { deepPartial(kind, tag, v, title, line) } })
+                // One model. Each finished line goes on the card while it writes the next, and a
+                // model that reads no images (one typed in, or Qwen) gets the text alone.
+                val ask = { m: String, prompt: String ->
+                    val once = { pic: String?, text: String ->
+                        OpenRouter.chat(prefs.orKey, m, system, text, pic, maxTokens = tokens, think = think,
+                            onLine = { line -> main.post { deepPartial(kind, tag, v, title, line) } })
+                    }
+                    runCatching { once(image, prompt) }.recoverCatching { e ->
+                        if (image != null && OpenRouter.noImages(e)) once(null, prompt.replace(OpenRouter.SCREENSHOT_NOTE, "")) else throw e
+                    }.getOrThrow()
                 }
-                // A model that reads no images (one typed in, or Qwen) gets the text alone.
-                val r = built.mapCatching { ask(image, it) }.recoverCatching { e ->
-                    if (image != null && OpenRouter.noImages(e)) ask(null, built.getOrThrow().replace(OpenRouter.SCREENSHOT_NOTE, "")) else throw e
+                // The model set in Setup first; when it fails in a way another model might not
+                // (busy, down, refusing, cut off), the backup is asked the same.
+                var backupNote: String? = null
+                val r = built.mapCatching { prompt ->
+                    try {
+                        ask(model, prompt)
+                    } catch (e: Exception) {
+                        if (backup == null || !OpenRouter.worthAnotherModel(e)) throw e
+                        Diag.log("deep: $model failed (${Judge.describe(e)}); asking $backup")
+                        val answer = try {
+                            ask(backup, prompt)
+                        } catch (e2: Exception) {
+                            throw OpenRouter.Failure(0, L.t("${Models.nameOf(model)}：${Judge.describe(e)}；${Models.nameOf(backup)} 也出错：${Judge.describe(e2)}",
+                                "${Models.nameOf(model)}: ${Judge.describe(e)}; ${Models.nameOf(backup)} failed too: ${Judge.describe(e2)}"))
+                        }
+                        backupNote = L.t("${Models.nameOf(model)} 出错（${Judge.describe(e)}），这次由 ${Models.nameOf(backup)} 回答",
+                            "${Models.nameOf(model)} failed (${Judge.describe(e)}); ${Models.nameOf(backup)} answered instead")
+                        answer
+                    }
                 }
                 r.onSuccess { Diag.log("deep($model) ok in ${System.currentTimeMillis() - started}ms") }
                     .onFailure { Diag.lastError = "deep: ${it.message}"; Diag.log(Diag.lastError) }
-                main.post { deepDone(kind, tag, v, title, r) }
+                val note = backupNote
+                main.post { deepDone(kind, tag, v, title, r, note) }
             }
         }
         // A picture of a different chat, or of this one scrolled back into its history after a read,
@@ -1277,12 +1307,13 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         }
     }
 
-    private fun deepDone(kind: String, tag: String, v: Verdict, title: String, r: Result<String>) {
+    private fun deepDone(kind: String, tag: String, v: Verdict, title: String, r: Result<String>, note: String? = null) {
         deepInFlight -= tag
         val wanted = deepWanted.remove(tag)
         val section = r.fold(
-            { text -> sectionFrom(kind, title, text, done = true)!! },
-            { e -> OverlayCard.Section(title, listOf(L.t("失败：", "Failed: ") + Judge.describe(e))) },
+            { text -> sectionFrom(kind, title, text, done = true)!!.withNote(note) },
+            // Both models' reasons in full when the backup failed too (describe() would cut them short).
+            { e -> OverlayCard.Section(title, listOf(L.t("失败：", "Failed: ") + (if (e is OpenRouter.Failure && e.status == 0) e.message.orEmpty() else Judge.describe(e)))) },
         )
         v.sections[kind] = section
         // Bound to the turn it was asked about: an answer that lands after a new message must not
@@ -1485,14 +1516,16 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
      * from all the notes. The card shows how far it has got ([Learning]), refreshed while it runs.
      * [readNow] is how many messages the read that led here got, or null when a write is picked
      * up again. [byUser]: the user asked (a read, or Learn on a stuck write), so what it says may
-     * pop the card open; a write picked up by itself only updates it.
+     * pop the card open; a write picked up by itself only updates it. [fresh] notes every stretch
+     * again instead of keeping the notes on those whose text has not changed.
      */
-    private fun writeProfile(id: String, readNow: Int?, byUser: Boolean) {
+    private fun writeProfile(id: String, readNow: Int?, byUser: Boolean, fresh: Boolean = false) {
         val rec = people.loadId(id)
         val name = displayName(rec)
         val title = L.t("学习此人", "Learn this person")
         val key = prefs.orKey
         val model = prefs.deepModel
+        val backup = Models.backup(model, prefs.fastModel, prefs.deepModel)
         // A write started again after it got stuck leaves the old one running: whatever that one
         // still does is dropped, by its number.
         val gen = (writeGen[id] ?: 0) + 1
@@ -1514,7 +1547,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                 progress.kept = history.size
                 progress.chars = history.sumOf { it.second.length }
                 val chunks = Archive.chunks(history, CHUNK_CHARS)
-                profileFrom(id, name, history, chunks, key, model) { stage, done, of ->
+                profileFrom(id, name, history, chunks, key, model, backup, fresh) { stage, done, of ->
                     progress.update(stage, done, of)
                     main.post { if (writeGen[id] == gen) showProgress(id) }
                 }
@@ -1544,6 +1577,24 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                     }
             }
         }
+    }
+
+    /**
+     * From the person's page in the app: [id]'s profile written again from the history kept on the
+     * phone, without opening the chat. [fresh] notes every stretch again (after a model change),
+     * rather than only those whose text changed. Null once it has started, else why not. Main thread.
+     */
+    fun rewriteFromKept(id: String, fresh: Boolean): String? {
+        if (prefs.orKey.isBlank()) return L.t("先在设置页填 OpenRouter Key", "Add the OpenRouter key on the Setup tab first")
+        if (people.archiveCount(id) == 0) return L.t("手机上还没有和 Ta 的聊天记录：先在聊天里点一次「学习」", "No history with them on this phone yet: tap Learn in their chat once first")
+        if (learning && learnId == id) return L.t("正在读 Ta 的聊天记录，读完会自己写档案", "Their history is being read; the profile follows by itself")
+        val p = Learning.writing[id]
+        if (id in writing && p != null && !Learning.stalled(p, System.currentTimeMillis()))
+            return L.t("已经在写了，进度就在这一页", "Already being written; the progress is on this page")
+        // Not writing, or stuck: (again) from the top, the stuck one's late result dropped.
+        writing -= id
+        writeProfile(id, null, byUser = false, fresh = fresh)
+        return null
     }
 
     /** Which write is the live one, per person: see [writeProfile]. Read from worker threads too. */
@@ -1600,17 +1651,19 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         chunks: List<IntRange>,
         key: String,
         model: String,
+        backup: String?,
+        fresh: Boolean,
         progress: (Learning.Stage, Int, Int) -> Unit,
     ): Pair<String, Int> {
         // A long run of calls meets the odd dropped connection or busy moment: each call is tried
         // again after a pause, and only a failure that does not go away ends the write.
-        fun ask(system: String, prompt: String, tokens: Int): String {
+        fun once(m: String, system: String, prompt: String, tokens: Int): String {
             var wait = 5_000L
             var tries = 0
             while (true) {
                 prefs.countUse(Prefs.USE_BIO)
                 try {
-                    return OpenRouter.chat(key, model, system, prompt, null, maxTokens = tokens, timeoutMs = 180_000, temperature = 0.4)
+                    return OpenRouter.chat(key, m, system, prompt, null, maxTokens = tokens, timeoutMs = 180_000, temperature = 0.4)
                 } catch (e: Exception) {
                     if (++tries >= ASK_TRIES || !Judge.isTransient(e)) throw e
                     Diag.log("learn: ${Judge.describe(e)}; again in ${wait / 1000}s")
@@ -1619,13 +1672,22 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                 }
             }
         }
+        // And when the model set for Think still fails, the other one is asked the same.
+        fun ask(system: String, prompt: String, tokens: Int): String = try {
+            once(model, system, prompt, tokens)
+        } catch (e: Exception) {
+            if (backup == null || !OpenRouter.worthAnotherModel(e)) throw e
+            Diag.log("learn: $model failed (${Judge.describe(e)}); asking $backup")
+            once(backup, system, prompt, tokens)
+        }
         if (chunks.size <= 1) {
             progress(Learning.Stage.FINAL, 0, 0)
             return ask(Profile.profileSystem(false), Profile.profilePrompt(name, history, Archive.text(history), false), 5000) to 0
         }
         val texts = chunks.map { Archive.text(history, it) }
         val hashes = texts.map { Archive.hash(it) }
-        val cached = people.notes(id)
+        // Done again from scratch when asked (after a model change): no stretch's old notes are kept.
+        val cached = if (fresh) emptyMap() else people.notes(id)
         val notes = arrayOfNulls<String>(chunks.size)
         for (i in chunks.indices) notes[i] = cached[hashes[i]]
         // Counted as each stretch comes back, in whatever order: one slow stretch no longer holds
@@ -2165,6 +2227,10 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     }
 
     companion object {
+        /** The service while it runs, for the app's buttons that act through it (same process). */
+        @Volatile var running: ChatReaderService? = null
+            private set
+
         private const val DEBOUNCE_MS = 450L
         private const val MAX_NODES = 3000
         /** A safety net, not a limit anyone should meet: the read ends at the first message. */

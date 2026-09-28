@@ -4,6 +4,30 @@ APKs for every version are on the [releases page](https://github.com/Neoo-Blue/v
 Each section below is also that release's notes: the Release workflow publishes the section whose
 heading matches the tag.
 
+## 6.8.5
+
+- **A second model stands in.** When the model asked fails in a way another might not (busy, down,
+  refusing, cut off halfway, an empty answer), the other model set in Setup is asked the same:
+  the reply model for Think, the Think model for replies. It works for deep reads, reply drafts,
+  profiles and the profile of you. The card says which answered, and when both fail it gives both
+  reasons. A rejected key, an empty balance or no network at all are the same for every model,
+  so those are not retried. With both set to one model, DeepSeek V4.1 Flash stands in.
+- **Deep reads have room to think.** Their reasoning counts against the answer's length, and 2,500
+  tokens could all go on it and leave "the model stopped before answering". They now get 4,000.
+- **Rewrite a profile from the kept history, in the app.** A person's page has 「用存的 N 条记录重新分析」
+  ("Rewrite from the N kept messages"). It writes their profile again from what is on the phone,
+  without opening the chat. The progress shows on the page, and the screen stays on while it runs.
+  - "Only what changed" keeps the notes on stretches whose text is the same, for after a fix like
+    6.8.4's voice messages.
+  - "Everything" notes every stretch again, for after a model change.
+
+中文：
+- **备用模型**：用到的模型出错时（忙、挂了、拒绝回答、半路断了、没写出内容），会自动换「设置」里的另一个模型再问一次：深思出错就换回复模型，回复出错就换深思模型。深思、回复、写档案、写关于你的档案都适用。卡片上会注明是谁回答的；两个都失败时会写出两个原因。Key 被拒、余额不足、完全没网这些换模型也没用，不会重试。两个模型选的是同一个时，备用的是 DeepSeek V4.1 Flash。
+- **深思有余地思考了**：模型的思考也算在回答长度里，原来 2500 的上限可能全被思考用掉，结果显示「模型没写完」。现在给到 4000。
+- **在应用里用存的记录重新分析**：每个人的页面上有「用存的 N 条记录重新分析」，不用打开聊天，直接用手机上存的记录重新写档案。页面上显示进度，写的时候屏幕保持常亮。
+  - 「只更新变了的」：内容没变的段落沿用以前的笔记，适合像 6.8.4 修了语音消息之后用；
+  - 「全部重做」：每一段都重新整理，适合换了模型以后用。
+
 ## 6.8.4
 
 - **Voice messages are not messages.** WeChat shows a voice message's length beside a sound-wave
