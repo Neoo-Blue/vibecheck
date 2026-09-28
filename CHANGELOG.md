@@ -4,6 +4,20 @@ APKs for every version are on the [releases page](https://github.com/Neoo-Blue/v
 Each section below is also that release's notes: the Release workflow publishes the section whose
 heading matches the tag.
 
+## 6.8.4
+
+- **Voice messages are not messages.** WeChat shows a voice message's length beside a sound-wave
+  icon, and OCR read the two together as 「3" ((」「4"(。」「2"(•」. Kept as messages, those made a
+  profile say you "like abstract emoticons and brackets". They are now left out, on screen and in
+  kept history. Tap Learn once on that person to rewrite the profile without them; only the
+  stretches that change are sent again.
+- **An emoji name is shown as its picture on the person's page**, instead of "Unnamed contact"
+  with the picture on a line below. A line says why, and where to give them a name in words.
+
+中文：
+- **语音消息不再当成消息**：微信在语音消息旁边显示秒数和声波图标，OCR 会把两者连在一起读成「3" ((」「4"(。」「2"(•」。这些被当成消息存下来后，档案就写成了你「爱用抽象表情和括号」。现在屏幕上和存档里都会去掉。装好后在那个人那里点一次「学习」，档案会重写，只有变了的段落会重新发送。
+- **表情名字的人，页面标题直接显示那张图**，不再显示「未命名联系人」、再在下面一行放图。标题下面会说明原因，以及在哪里可以给 Ta 起个文字名字。
+
 ## 6.8.3
 
 **You can see a profile being written.** Learn used to say 「还在整理上次读到的记录」 and nothing

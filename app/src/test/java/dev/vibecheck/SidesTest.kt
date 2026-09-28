@@ -147,12 +147,13 @@ class SidesTest {
             "No answer", "Unanswered", "Line busy", "Call failed", "Duration 00:37", "Call Duration 03:12",
             // The phone icon read as a mark or a letter.
             "C 已取消", "已取消 C", "& Canceled", "© 对方已取消", "Cancelled.",
-            // A voice message's length.
-            "5\"", "12″", "59”",
+            // A voice message's length, and with its sound-wave icon read as brackets and dots
+            // (learned as "likes abstract emoticons and brackets" in a 🍵 profile).
+            "5\"", "12″", "59”", "3\" ((", "4\"(。", "2\"(•", "))) 12\"", "8\" C",
         )) assertTrue(t, Chat.isNotification(t))
         for (t in listOf(
             "我已经取消了", "取消吧", "订单已取消了吗", "I canceled", "Ok canceled", "cancel it", "declined the offer",
-            "No answer yet?", "call me later", "5 mins", "12 点见", "正忙", "忙线",
+            "No answer yet?", "call me later", "5 mins", "12 点见", "正忙", "忙线", "3\"好", "等我 5\"",
         )) assertFalse(t, Chat.isNotification(t))
     }
 
