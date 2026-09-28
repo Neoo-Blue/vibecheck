@@ -147,6 +147,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        main.removeCallbacks(progressTick)
         io.shutdown()
         super.onDestroy()
     }
@@ -517,6 +518,21 @@ class MainActivity : Activity() {
     /** The person whose page is open on the People tab, or null for the list. */
     private var personShown: String? = null
 
+    /** The progress of a profile being written, on the open person's page; null when there is none. */
+    private var progressView: TextView? = null
+
+    /** Redraws [progressView] while the write runs, and the whole page once it is done. */
+    private val progressTick = object : Runnable {
+        override fun run() {
+            val v = progressView ?: return
+            val id = personShown ?: return
+            val p = Learning.writing[id]
+            if (p == null) { progressView = null; showPerson(id); return }
+            v.text = Learning.lines(p, System.currentTimeMillis()).joinToString("\n")
+            main.postDelayed(this, PROGRESS_TICK_MS)
+        }
+    }
+
     /** The list again, unless a person's page is open (it may have a half-typed note on it). */
     private fun refreshPeople() {
         if (::peoplePage.isInitialized && personShown == null) showPeople()
@@ -524,6 +540,7 @@ class MainActivity : Activity() {
 
     private fun showPeople(query: String = "") {
         personShown = null
+        progressView = null
         peoplePage.removeAllViews()
         peoplePage.addView(buildPeople(query))
     }
@@ -541,6 +558,7 @@ class MainActivity : Activity() {
     private fun showMe() {
         saveFields()
         personShown = ME_PAGE
+        progressView = null
         peoplePage.removeAllViews()
         peoplePage.addView(buildMe())
         peoplePage.post { peoplePage.scrollTo(0, 0) }
@@ -712,6 +730,7 @@ class MainActivity : Activity() {
             e.apps.joinToString("+") { Apps.label(it) },
             e.kind,
             if (e.learned > 0) L.t("学习了 ${e.learned} 条", "${e.learned} learned") else L.t("还没学习", "not learned"),
+            L.t("正在写档案", "writing the profile").takeIf { Learning.writing.containsKey(e.id) },
             L.t("已暂停", "paused").takeIf { e.muted },
         )
         addView(text(facts.joinToString("  ·  "), 13f, if (e.muted) warn() else sub()).apply { setPadding(0, dp(2), 0, 0) })
@@ -727,6 +746,7 @@ class MainActivity : Activity() {
      */
     private fun buildPerson(id: String, focusName: Boolean): View = column().apply {
         val r = people.loadId(id)
+        progressView = null
         addView(LinearLayout(this@MainActivity).apply {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(0, dp(6), 0, 0)
@@ -756,6 +776,15 @@ class MainActivity : Activity() {
 
         // What the history read learned.
         addView(tile(null, L.t("学到了什么", "What was learned"), learnedLine(r)) {
+            // Being written right now: how far it has got, kept up to date while the page is open.
+            Learning.writing[id]?.let { p ->
+                progressView = text(Learning.lines(p, System.currentTimeMillis()).joinToString("\n"), 14f, accent()).also {
+                    it.setPadding(0, dp(2), 0, dp(8))
+                    addView(it)
+                }
+                main.removeCallbacks(progressTick)
+                main.postDelayed(progressTick, PROGRESS_TICK_MS)
+            }
             val secs = Profile.sections(r.bio)
             if (secs.isEmpty()) addView(text(L.t("还没学习：在和 Ta 的聊天里打开卡片，点「学习」。应用会自己翻完你们的聊天记录，写一份档案。",
                 "Not learned yet: open the card in your chat with them and tap Learn. It reads your whole history and writes a profile."), 14f, fg()))
@@ -1263,6 +1292,8 @@ class MainActivity : Activity() {
         private const val TAB_SETUP = 0
         private const val TAB_TOOLS = 1
         private const val TAB_PEOPLE = 2
+        /** How often a person's page redraws the progress of a profile being written. */
+        private const val PROGRESS_TICK_MS = 5_000L
         /** [personShown] while the page about me is open. */
         private const val ME_PAGE = "\u0000me"
 

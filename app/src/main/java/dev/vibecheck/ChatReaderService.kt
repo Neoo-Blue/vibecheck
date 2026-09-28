@@ -87,8 +87,11 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     private val judgeIo = Executors.newSingleThreadExecutor(Crash.threads("vibecheck-judge"))
     /** OpenRouter: deep reads, reply drafts, profiles. Seconds each, so never queued in front of a judgment. */
     private val deepIo = Executors.newFixedThreadPool(2, Crash.threads("vibecheck-deep"))
-    /** Writing a profile: one coordinator per person, and the notes on stretches of history three at a time. */
-    private val profileIo = Executors.newSingleThreadExecutor(Crash.threads("vibecheck-profile"))
+    /**
+     * Writing a profile: one coordinator per write, side by side (a write started again after it
+     * got stuck must not queue behind the stuck one), and the notes on stretches three at a time.
+     */
+    private val profileIo = Executors.newCachedThreadPool(Crash.threads("vibecheck-profile"))
     private val notesIo = Executors.newFixedThreadPool(3, Crash.threads("vibecheck-notes"))
     /** Learning about me: day write-ups and the profile of me, one at a time. */
     private val meIo = Executors.newSingleThreadExecutor(Crash.threads("vibecheck-me"))
@@ -182,6 +185,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
 
     override fun onServiceConnected() {
         Crash.install(this)
+        Learning.writing.clear()
         prefs = Prefs(this)
         prefs.lang   // applies the UI language to L
         people = PersonStore(this)
@@ -345,6 +349,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
 
     override fun onDestroy() {
         Diag.connected = false
+        Learning.writing.clear()
         learning = false
         main.removeCallbacksAndMessages(null)
         if (::prefs.isInitialized) prefs.unlisten(prefListener)
@@ -588,8 +593,9 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             ?: (if (Person.isTyping(lastTitles)) lastPeerName?.takeIf { activeId != null } else unreadableName())
             ?: UNKNOWN
         lastPeerName = name
-        // Their message quoted under my reply is their words, not mine.
-        val bubbles = if (name == UNKNOWN || Person.isFingerprint(name)) read else Chat.withoutQuotes(read, name)
+        // A quote is someone's earlier words, not a new message: theirs under my reply (by their
+        // name), or anyone's whose words are further up the screen.
+        val bubbles = Chat.withoutEchoes(if (name == UNKNOWN || Person.isFingerprint(name)) read else Chat.withoutQuotes(read, name))
         if (bubbles.isEmpty()) { card.suspend(); return }
         val record = people.load(targetPkg, name)
         val id = record.id
@@ -1315,7 +1321,18 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         }
         if (learning) return
         if (rec.id in writing) {
-            card.setSection(LEARN, OverlayCard.Section(title, listOf(L.t("还在整理上次读到的记录，好了会显示在这里", "Still writing up the last read; it will show here"))), true)
+            val p = Learning.writing[rec.id]
+            val now = System.currentTimeMillis()
+            // Stuck (no sign of life for minutes): given up on, and written again. Stretches
+            // already noted are kept, so only what is missing is paid for again.
+            if (p != null && Learning.stalled(p, now)) {
+                Diag.log("learn: ${rec.name}'s write is stuck; starting it again")
+                writing -= rec.id
+                writeProfile(rec.id, null, byUser = true)
+                return
+            }
+            card.setSection(LEARN, OverlayCard.Section(title, p?.let { Learning.lines(it, now) }
+                ?: listOf(L.t("还在整理上次读到的记录，好了会显示在这里", "Still writing up the last read; it will show here"))), true)
             return
         }
         learning = true
@@ -1365,7 +1382,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             // Within a page bubbles run oldest→newest; a page reached by scrolling up is older
             // than everything already kept, so what is not in the overlap goes to the front.
             // Their message quoted under my reply is theirs: left out, not kept as mine.
-            val shown = if (Person.isFingerprint(learnName)) bubbles else Chat.withoutQuotes(bubbles, learnName)
+            val shown = Chat.withoutEchoes(if (Person.isFingerprint(learnName)) bubbles else Chat.withoutQuotes(bubbles, learnName))
             val page = shown.map { (if (it.incoming) "对方" else "我") to it.text }
             val fresh = Chat.freshLines(learnHistory, page)
             learnHistory.addAll(0, fresh)
@@ -1459,53 +1476,57 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                 L.t("填了 OpenRouter Key 才能写档案", "Add an OpenRouter key to get a profile")))
             return
         }
-        writeProfile(id, read.size)
+        writeProfile(id, read.size, byUser = true)
     }
 
     /**
      * The profile from everything kept for this person. A long history goes in stretches: notes
      * on each (three at a time, and never again for a stretch already noted), then one profile
-     * from all the notes. The card shows how far it has got. [readNow] is how many messages the
-     * read that led here got, or null when a write that lost its connection is picked up again.
+     * from all the notes. The card shows how far it has got ([Learning]), refreshed while it runs.
+     * [readNow] is how many messages the read that led here got, or null when a write is picked
+     * up again. [byUser]: the user asked (a read, or Learn on a stuck write), so what it says may
+     * pop the card open; a write picked up by itself only updates it.
      */
-    private fun writeProfile(id: String, readNow: Int?) {
+    private fun writeProfile(id: String, readNow: Int?, byUser: Boolean) {
         val rec = people.loadId(id)
         val name = displayName(rec)
         val title = L.t("学习此人", "Learn this person")
         val key = prefs.orKey
         val model = prefs.deepModel
+        // A write started again after it got stuck leaves the old one running: whatever that one
+        // still does is dropped, by its number.
+        val gen = (writeGen[id] ?: 0) + 1
+        writeGen[id] = gen
+        val progress = Learning.Progress(System.currentTimeMillis(), readNow)
+        Learning.writing[id] = progress
         writing += id
         awake()
-        // Picked up again by itself (readNow null): the card is not popped open for it, only
-        // for a read the user started.
         learnResult(id, title, listOf(
             if (readNow == null) L.t("接着写档案…", "Picking the profile up again…")
-            else L.t("读了 $readNow 条，开始写档案…", "Read $readNow messages, starting the profile…")), open = readNow != null)
+            else L.t("读了 $readNow 条，开始写档案…", "Read $readNow messages, starting the profile…"),
+            L.t("在后台写，不用重来。", "It runs in the background; no need to start again.")), open = byUser)
+        tickProgress()
         profileIo.execute {
             // Everything, reading the kept history included, inside: a failure anywhere must end
             // the write, or the person stays "still writing" and the screen stays on for good.
-            var size = ""
-            var total = 0
             val r = runCatching {
                 val history = people.archiveAll(id)
-                total = history.size
+                progress.kept = history.size
+                progress.chars = history.sumOf { it.second.length }
                 val chunks = Archive.chunks(history, CHUNK_CHARS)
-                val chars = history.sumOf { it.second.length }
-                val amount = if (L.en) (if (chars < 1000) "$chars characters" else "~${(chars + 500) / 1000}k characters")
-                    else if (chars < 10_000) "$chars 字" else "约 ${"%.1f".format(chars / 10_000.0)} 万字"
-                size = if (readNow == null) L.t("共存 ${history.size} 条（$amount）", "${history.size} messages kept ($amount)")
-                    else L.t("读了 $readNow 条，共存 ${history.size} 条（$amount）", "Read $readNow, kept ${history.size} messages ($amount)")
-                val progress = { done: Int ->
-                    main.post { learnResult(id, title, listOf(size, L.t("正在写档案：$done / ${chunks.size}", "Writing the profile: $done of ${chunks.size}"),
-                        L.t("写完之前屏幕会一直亮着", "The screen stays on until it is done")), open = false) }
-                    Unit
+                profileFrom(id, name, history, chunks, key, model) { stage, done, of ->
+                    progress.update(stage, done, of)
+                    main.post { if (writeGen[id] == gen) showProgress(id) }
                 }
-                profileFrom(id, name, history, chunks, key, model, progress)
             }
             main.post {
+                if (writeGen[id] != gen) { Diag.log("learn: a write given up on has ended"); return@post }
                 writing -= id
+                Learning.writing.remove(id)
                 awake()
-                r.onSuccess { (text, skipped) -> resumes.remove(id); profileDone(id, total, text, skipped, open = readNow != null) }
+                val size = if (progress.kept > 0) L.t("共存 ${progress.kept} 条（${Learning.amount(progress.chars)}）",
+                    "${progress.kept} messages kept (${Learning.amount(progress.chars)})") else null
+                r.onSuccess { (text, skipped) -> resumes.remove(id); profileDone(id, progress.kept, text, skipped, open = byUser) }
                     .onFailure {
                         Diag.log("learn: profile failed ${it.message}")
                         // A lost connection mends itself: picked up again once back in this chat,
@@ -1516,13 +1537,39 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                             resumeAt = System.currentTimeMillis() + PROFILE_RESUME_MS
                             if (activeId == id) rescanSoon(PROFILE_RESUME_MS + 100)
                         } else resumes.remove(id)
-                        learnResult(id, title, listOfNotNull(size.ifBlank { null }, L.t("档案没写成：", "The profile failed: ") + Judge.describe(it),
+                        learnResult(id, title, listOfNotNull(size, L.t("档案没写成：", "The profile failed: ") + Judge.describe(it),
                             if (again) L.t("读到的和写好的部分都存下了，回到这个聊天会自动接着写", "Everything read and written so far is kept; it carries on by itself when you are back in this chat")
                             else L.t("读到的都存下了，再点「学习」只会补写没写完的部分", "Everything read is kept; Learn again only redoes what is missing")),
-                            open = readNow != null)
+                            open = byUser)
                     }
             }
         }
+    }
+
+    /** Which write is the live one, per person: see [writeProfile]. Read from worker threads too. */
+    private val writeGen = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
+    /** How far [id]'s write has got, on the card (never popping it open). */
+    private fun showProgress(id: String) {
+        val p = Learning.writing[id] ?: return
+        learnResult(id, L.t("学习此人", "Learn this person"), Learning.lines(p, System.currentTimeMillis()), open = false)
+    }
+
+    /**
+     * While a profile is being written its panel is redrawn every little while, so the time taken,
+     * the estimate, and a stall show without waiting for the next stretch to be done.
+     */
+    private val progressTick = object : Runnable {
+        override fun run() {
+            if (writing.isEmpty()) return
+            for (id in writing) showProgress(id)
+            main.postDelayed(this, PROGRESS_TICK_MS)
+        }
+    }
+
+    private fun tickProgress() {
+        main.removeCallbacks(progressTick)
+        main.postDelayed(progressTick, PROGRESS_TICK_MS)
     }
 
     /** Profile writes cut off by a lost connection, by person: how many times each was picked up again. */
@@ -1535,7 +1582,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         if (id in writing || learning || System.currentTimeMillis() < resumeAt || prefs.orKey.isBlank()) return
         resumes[id] = n + 1
         Diag.log("learn: picking up ${people.nameOf(id)}'s profile again (${n + 1})")
-        writeProfile(id, null)
+        writeProfile(id, null, byUser = false)
     }
 
     /**
@@ -1553,7 +1600,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         chunks: List<IntRange>,
         key: String,
         model: String,
-        progress: (Int) -> Unit,
+        progress: (Learning.Stage, Int, Int) -> Unit,
     ): Pair<String, Int> {
         // A long run of calls meets the odd dropped connection or busy moment: each call is tried
         // again after a pause, and only a failure that does not go away ends the write.
@@ -1573,7 +1620,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             }
         }
         if (chunks.size <= 1) {
-            progress(0)
+            progress(Learning.Stage.FINAL, 0, 0)
             return ask(Profile.profileSystem(false), Profile.profilePrompt(name, history, Archive.text(history), false), 5000) to 0
         }
         val texts = chunks.map { Archive.text(history, it) }
@@ -1581,16 +1628,22 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         val cached = people.notes(id)
         val notes = arrayOfNulls<String>(chunks.size)
         for (i in chunks.indices) notes[i] = cached[hashes[i]]
-        var done = notes.count { it != null }
-        progress(done)
+        // Counted as each stretch comes back, in whatever order: one slow stretch no longer holds
+        // the count still while the others are done.
+        val finished = java.util.concurrent.atomic.AtomicInteger(notes.count { it != null })
+        progress(Learning.Stage.NOTES, finished.get(), chunks.size)
         val jobs = chunks.indices.filter { notes[it] == null }.map { i ->
-            i to notesIo.submit<String> { ask(Profile.NOTES_SYSTEM, Profile.notesPrompt(name, i + 1, chunks.size, texts[i]), 2500) }
+            i to notesIo.submit<String> {
+                try {
+                    ask(Profile.NOTES_SYSTEM, Profile.notesPrompt(name, i + 1, chunks.size, texts[i]), 2500)
+                } finally {
+                    progress(Learning.Stage.NOTES, finished.incrementAndGet(), chunks.size)
+                }
+            }
         }
         var failure: Throwable? = null
         for ((i, job) in jobs) {
             notes[i] = runCatching { job.get() }.onFailure { failure = it.cause ?: it }.getOrNull()
-            done++
-            progress(done)
             // Kept as each one lands, even if the profile below fails: the next try pays only for
             // what is missing.
             if (notes[i] != null) people.saveNotes(id, chunks.indices.filter { notes[it] != null }.associate { hashes[it] to notes[it]!! })
@@ -1603,9 +1656,11 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         while (layer.size > 1 && layer.sumOf { it.length } > REDUCE_CHARS) {
             val groups = Profile.groups(layer, REDUCE_CHARS / 2)
             if (groups.size >= layer.size) break
+            progress(Learning.Stage.MERGE, 0, 0)
             layer = groups.map { g -> if (g.size == 1) g[0] else ask(Profile.MERGE_SYSTEM, Profile.mergePrompt(name, g), 3000) }
         }
         val body = layer.withIndex().joinToString("\n\n") { (i, n) -> "--- ${i + 1} ---\n$n" }
+        progress(Learning.Stage.FINAL, 0, 0)
         return ask(Profile.profileSystem(true), Profile.profilePrompt(name, history, body, true), 5000) to notes.count { it == null }
     }
 
@@ -2138,6 +2193,8 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         private const val UNKNOWN = "未知"
         /** Longer than a judgment's two calls with their retries ever take. */
         private const val STUCK_MS = 180_000L
+        /** How often a profile write's progress is redrawn while nothing else changes. */
+        private const val PROGRESS_TICK_MS = 15_000L
 
         private const val DEEP = "deep"
         private const val REPLY = "reply"

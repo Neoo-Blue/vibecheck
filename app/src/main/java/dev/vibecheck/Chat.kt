@@ -275,6 +275,27 @@ object Chat {
     }
 
     /**
+     * A quote of a message further up the screen, whoever is quoted: 「名字：原话」 where the words
+     * after the colon are that message (WeChat cuts a long one short with "…"). Their quote of my
+     * message sits on their side under my name, which is not theirs and which OCR cannot always
+     * read (「A°😉：女大is no more」 under "The more I want to know the more 醋"): the words give it
+     * away instead.
+     */
+    fun withoutEchoes(bubbles: List<Bubble>): List<Bubble> =
+        bubbles.filterIndexed { i, b ->
+            val m = QUOTE.find(b.text) ?: return@filterIndexed true
+            val said = norm(m.groupValues[2]).trimEnd('…', '.', '。')
+            if (said.length < 2 || said.startsWith("//")) return@filterIndexed true
+            bubbles.subList(0, i).none { other ->
+                val o = norm(other.text)
+                o == said || (said.length >= 4 && o.startsWith(said)) || close(o, said)
+            }
+        }
+
+    /** A name of up to 24 characters, a colon, and what they said. */
+    private val QUOTE = Regex("""^\s*(.{1,24}?)\s*[：:]\s*(.+)$""")
+
+    /**
      * Where the reply box is while the keyboard is up, for a screen read by OCR, which has no text
      * field to go by: the row right above the keyboard. Read as a message, a draft being typed
      * there was "their" newest line. Null for a keyboard that does not sit along the bottom.
