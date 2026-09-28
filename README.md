@@ -84,7 +84,7 @@ The app has three tabs, and everything saves as you go:
   - pause, merge with another app, retake the name picture, delete the kept history, forget.
 - **Tools** holds everything else, one simple tile each: **Pause** (1 hour, or until 8 am),
   **Card** (text size, which buttons the card shows, buzz on high risk, bubble position),
-  **Usage** (paid calls today and in total), **Backup** (export / import people memory as a file;
+  **Usage** (paid calls, tokens and cost per kind of call, today and in total), **Backup** (export / import people memory as a file;
   keys are not included), **Keep it running** (battery optimisation and app info shortcuts),
   **Diagnostics** (live status, the last crash with where and when, debug mode, the LAN endpoint)
   and **How it works**.
@@ -133,7 +133,8 @@ can score opposite ways in different situations, and nothing is shared between p
 
 ## The card
 
-**At rest there is only the bubble.** Judging still runs on every new message; the result shows
+**At rest there is only the bubble.** Judging still runs on every new message; several sent in a
+row are judged once, when they stop. The result shows
 on the bubble as the danger number and a colour (green → yellow → red). Tap to open, ✕ to
 collapse. **Drag** the bubble to move it (it snaps to the nearest edge and remembers the spot);
 **long-press** it for the menu. The card is a trusted window, so tapping it does not block the
@@ -346,7 +347,9 @@ Learn about me, on by default):
   also read for what they show about you (cached, like a person's notes). Those notes, your
   recent days and the people in your life are merged into one profile: who you are, how you talk
   (specific enough to imitate, and how it differs between people), what you like and dislike,
-  what you have been busy with, what you care about, and the people in your life.
+  what you have been busy with, what you care about, and the people in your life. Written on its
+  own, a chat's newest stretch keeps its notes until it has grown by half, and nothing is written
+  when nothing it is made from has changed; "Write my profile" always writes it from everything.
 
 It shows as **Me** at the top of the People tab. Its page has:
 - the profile, section by section;

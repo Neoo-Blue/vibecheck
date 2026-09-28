@@ -12,12 +12,17 @@ object TypeSafe {
 
     class Failure(val status: Int, message: String) : Exception(message)
 
-    /** Blocking. Call from a background thread. Retries busy or briefly unreachable twice, with a short backoff. */
-    fun ask(apiKey: String, body: String, endpoint: String = ENDPOINT): Map<String, Jev.Answer> {
+    /**
+     * Blocking. Call from a background thread. Retries busy or briefly unreachable twice, with a
+     * short backoff. What the call used, when the answer says, is added up under [kind].
+     */
+    fun ask(apiKey: String, body: String, endpoint: String = ENDPOINT, kind: String = Prefs.USE_JUDGE): Map<String, Jev.Answer> {
         var attempt = 0
         while (true) {
             try {
-                return parse(post(apiKey, body, endpoint))
+                val text = post(apiKey, body, endpoint)
+                usage(text)?.let { u -> runCatching { OpenRouter.onUsage?.invoke(kind, u) } }
+                return parse(text)
             } catch (e: Exception) {
                 if (retryable(e) && attempt < 2) {
                     attempt++
@@ -60,6 +65,17 @@ object TypeSafe {
         } finally {
             conn.disconnect()
         }
+    }
+
+    /** The answer's "usage", in OpenRouter's words or with input/output tokens; null when it has none. */
+    fun usage(json: String): OpenRouter.Usage? {
+        val u = runCatching { JSONObject(json).optJSONObject("usage") }.getOrNull() ?: return null
+        OpenRouter.usageOf(u)?.let { return it }
+        val prompt = u.optInt("input_tokens", -1)
+        val completion = u.optInt("output_tokens", -1)
+        if (prompt < 0 && completion < 0) return null
+        return OpenRouter.Usage(prompt.coerceAtLeast(0), completion.coerceAtLeast(0), 0, 0,
+            u.optDouble("cost", 0.0).takeUnless { it.isNaN() } ?: 0.0)
     }
 
     /** One malformed answer is skipped rather than failing the whole judgment. */

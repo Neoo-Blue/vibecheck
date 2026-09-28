@@ -152,6 +152,44 @@ object Me {
             "how it differs between people, with quotes. [What I'm busy with] in time order, newest first. [People in my " +
             "life] one line each: name, what they are to me. At most 600 words.")
 
+    // ---- not paying twice for the same notes ----
+
+    /**
+     * Notes taken on a chat's newest stretch still stand for it while it has grown by less than
+     * half, and by less than [MIN_GROWTH] characters when it is short: that stretch grows with
+     * every message, and all of it used to be noted again each time the profile of me was
+     * written. Meanwhile what is newer is in the day write-ups. A finished stretch, which grows no
+     * more, is noted once more in full.
+     */
+    fun stillServes(notedChars: Int, chars: Int): Boolean =
+        notedChars > 0 && chars >= notedChars && chars - notedChars < maxOf(notedChars / 2, MIN_GROWTH)
+
+    const val MIN_GROWTH = 1_500
+
+    /** Where a stretch begins, which stays put as the stretch grows: whose chat, and its first lines. */
+    fun startKey(person: String, lines: List<Pair<String, String>>, range: IntRange): String =
+        Archive.hash("me:start\n$person\n" + Archive.text(lines, range.first..minOf(range.last, range.first + 2)))
+
+    /**
+     * The notes that stand for a stretch, and the key they are kept under: its own, or for the
+     * newest stretch of a chat ([newest]), those on an earlier version of it that [stillServes].
+     * [starts] maps a stretch's [startKey] to the key and length of the text last noted there.
+     */
+    fun reuse(
+        notes: Map<String, String>,
+        starts: Map<String, String>,
+        hash: String,
+        start: String,
+        chars: Int,
+        newest: Boolean,
+    ): Pair<String, String>? {
+        notes[hash]?.let { return hash to it }
+        if (!newest) return null
+        val (h, n) = starts[start]?.split(' ')?.takeIf { it.size == 2 } ?: return null
+        if (!stillServes(n.toIntOrNull() ?: return null, chars)) return null
+        return notes[h]?.let { h to it }
+    }
+
     fun notesPrompt(peer: String, part: Int, parts: Int, text: String): String =
         L.t("和我聊天的人：$peer\n第 $part / $parts 段：\n", "Chat with: $peer\nPart $part of $parts:\n") + text
 

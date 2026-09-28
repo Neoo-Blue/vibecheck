@@ -110,6 +110,9 @@ object Profile {
         L.t("对方：$peer\n", "Them: $peer\n") + notes.joinToString("\n\n") { "---\n$it" }
 
     /** Consecutive groups of notes, each within [maxChars], for merging a step at a time. */
+    /** The key a merge of [group] is kept under: the same notes merged again cost nothing. */
+    fun mergeKey(group: List<String>): String = "m" + Archive.hash("merge\n" + group.joinToString("\n\n"))
+
     fun groups(notes: List<String>, maxChars: Int): List<List<String>> {
         val out = ArrayList<List<String>>()
         var cur = ArrayList<String>()

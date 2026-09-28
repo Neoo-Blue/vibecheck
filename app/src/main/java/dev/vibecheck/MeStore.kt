@@ -56,6 +56,16 @@ class MeStore(ctx: Context) {
 
     fun saveNotes(notes: Map<String, String>) = sp.edit().putString("notes", Profile.saveNotes(notes)).apply()
 
+    /** Per stretch start (Me.startKey): the key of the notes last taken there and how long the text was. */
+    fun starts(): Map<String, String> = Profile.loadNotes(sp.getString("starts", "") ?: "")
+
+    fun saveStarts(starts: Map<String, String>) = sp.edit().putString("starts", Profile.saveNotes(starts)).apply()
+
+    /** What the profile of me was last written from (a hash): the same again is not paid for twice. */
+    var basis: String
+        get() = sp.getString("basis", "") ?: ""
+        set(v) = sp.edit().putString("basis", v).apply()
+
     /** Only the newest [keep] days are kept, log and write-up. */
     @Synchronized
     fun prune(keep: Int = 90) {

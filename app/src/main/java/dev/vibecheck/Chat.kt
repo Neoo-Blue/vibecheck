@@ -518,6 +518,16 @@ object Chat {
         a.first == b.first && similar(a.second, b.second)
 
     /**
+     * The same newest [n] messages, from the same people, up to what OCR reads differently from
+     * one frame to the next: the turn already judged, not a new one.
+     */
+    fun sameTurn(a: List<Pair<String, String>>, b: List<Pair<String, String>>, n: Int = 3): Boolean {
+        val x = a.takeLast(n)
+        val y = b.takeLast(n)
+        return x.isNotEmpty() && x.size == y.size && x.indices.all { same(x[it], y[it]) }
+    }
+
+    /**
      * Equal, or equal up to the odd character OCR reads differently between two frames: one
      * edit per five characters. Under five characters it must be exact, or 好的 and 好吧 would
      * be one message.

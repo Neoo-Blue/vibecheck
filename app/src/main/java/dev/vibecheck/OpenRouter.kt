@@ -50,11 +50,37 @@ object OpenRouter {
         think: Think = Think.LOW,
         onLine: ((String) -> Unit)? = null,
         deadline: Deadline? = null,
+        /** What the call is for (Prefs.USE_*), so what it used is added up under that. */
+        kind: String = "other",
     ): String = try {
-        send(apiKey, model, system, user, imageJpegBase64, maxTokens, timeoutMs, temperature, think, onLine, deadline)
+        send(apiKey, model, system, user, imageJpegBase64, maxTokens, timeoutMs, temperature, think, onLine, deadline, kind)
     } catch (e: Failure) {
         if (!thinkingRequired(think, e)) throw e
-        send(apiKey, model, system, user, imageJpegBase64, maxOf(maxTokens, 4000), timeoutMs, temperature, Think.LOW, onLine, deadline)
+        send(apiKey, model, system, user, imageJpegBase64, maxOf(maxTokens, 4000), timeoutMs, temperature, Think.LOW, onLine, deadline, kind)
+    }
+
+    /**
+     * What one call used, as OpenRouter reports it: tokens in (and how many of those came from the
+     * provider's cache, billed at a fraction), tokens out (and how many of those were thinking),
+     * and the cost in dollars.
+     */
+    class Usage(val prompt: Int, val completion: Int, val cached: Int, val reasoning: Int, val cost: Double)
+
+    /** Told what every call used, with its kind: the service adds it up (Prefs.addUsage). */
+    @Volatile var onUsage: ((String, Usage) -> Unit)? = null
+
+    /** The "usage" object of a response or of a stream's last chunk. */
+    fun usageOf(o: JSONObject?): Usage? {
+        if (o == null) return null
+        val prompt = o.optInt("prompt_tokens", -1)
+        val completion = o.optInt("completion_tokens", -1)
+        if (prompt < 0 && completion < 0) return null
+        return Usage(
+            prompt.coerceAtLeast(0), completion.coerceAtLeast(0),
+            o.optJSONObject("prompt_tokens_details")?.optInt("cached_tokens", 0) ?: 0,
+            o.optJSONObject("completion_tokens_details")?.optInt("reasoning_tokens", 0) ?: 0,
+            o.optDouble("cost", 0.0).takeUnless { it.isNaN() } ?: 0.0,
+        )
     }
 
     /**
@@ -116,6 +142,7 @@ object OpenRouter {
         think: Think,
         onLine: ((String) -> Unit)?,
         deadline: Deadline?,
+        kind: String,
     ): String {
         val content = if (imageJpegBase64 == null) JSONObject().put("role", "user").put("content", user)
         else JSONObject().put("role", "user").put(
@@ -134,6 +161,8 @@ object OpenRouter {
             .put("temperature", temperature)
             .put("max_tokens", maxTokens)
             .put("stream", true)
+            // The tokens and cost of the call, in the stream's last chunk: added up per kind of call.
+            .put("usage", JSONObject().put("include", true))
             .put("reasoning", reasoning(think))
             .put(
                 "messages", JSONArray()
@@ -159,9 +188,15 @@ object OpenRouter {
                 val text = conn.errorStream?.bufferedReader()?.use(BufferedReader::readText) ?: ""
                 throw Failure(code, "HTTP $code: ${text.take(160)}")
             }
+            val used = { u: Usage -> runCatching { onUsage?.invoke(kind, u) } }
             val text = if (conn.contentType.orEmpty().contains("event-stream"))
-                conn.inputStream.bufferedReader(Charsets.UTF_8).use { collect(it.lineSequence().iterator(), ::piece, deadline = deadline, onLine = onLine) }
-            else whole(conn.inputStream.bufferedReader(Charsets.UTF_8).use(BufferedReader::readText))
+                conn.inputStream.bufferedReader(Charsets.UTF_8).use {
+                    collect(it.lineSequence().iterator(), ::piece, deadline = deadline, onUsage = { u -> used(u) }, onLine = onLine)
+                }
+            else conn.inputStream.bufferedReader(Charsets.UTF_8).use(BufferedReader::readText).let { raw ->
+                usageOf(runCatching { JSONObject(raw).optJSONObject("usage") }.getOrNull())?.let { used(it) }
+                whole(raw)
+            }
             val answer = text.trim()
             if (answer.isNotEmpty()) return answer
             // Never fall back to the reasoning: that is the model's private scratchpad, and showing
@@ -178,6 +213,8 @@ object OpenRouter {
         val error: Failure?,
         /** The model is at work: a word of the answer, or of its thinking. */
         val alive: Boolean = text != null,
+        /** What the call used, sent with the last chunk. */
+        val usage: Usage? = null,
     )
 
     /** The payload of a server-sent event line; null for comments (": OPENROUTER PROCESSING") and the rest. */
@@ -197,12 +234,16 @@ object OpenRouter {
         piece: (String) -> Piece,
         deadline: Deadline? = null,
         now: () -> Long = System::currentTimeMillis,
+        onUsage: ((Usage) -> Unit)? = null,
         onLine: ((String) -> Unit)? = null,
     ): String {
         val out = StringBuilder()
         var shown = 0
         val started = now()
         var lastAlive = -1L
+        // Sent with the last chunk; kept until the end, so a provider that sends a running count
+        // on every chunk is counted once.
+        var usage: Usage? = null
         for (line in lines) {
             // Checked on every line, the pings included, which keep coming while a model waits.
             if (deadline != null) {
@@ -222,6 +263,7 @@ object OpenRouter {
             if (data.isEmpty()) continue
             val p = piece(data)
             p.error?.let { throw it }
+            p.usage?.let { usage = it }
             if (p.alive) lastAlive = now()
             p.text?.let { out.append(it) }
             if (onLine != null) {
@@ -229,6 +271,7 @@ object OpenRouter {
                 if (done > shown) { shown = done; onLine(out.substring(0, done)) }
             }
         }
+        usage?.let { u -> onUsage?.invoke(u) }
         return out.toString()
     }
 
@@ -238,12 +281,13 @@ object OpenRouter {
         o.optJSONObject("error")?.let { e ->
             return Piece(null, Failure(e.optInt("code"), e.optString("message").ifBlank { "stream error" }))
         }
-        val delta = o.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("delta") ?: return Piece(null, null)
+        val usage = usageOf(o.optJSONObject("usage"))
+        val delta = o.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("delta") ?: return Piece(null, null, usage = usage)
         val text = if (delta.isNull("content")) null else delta.optString("content")
         // The first chunk is often an empty "content" with the role, sent before any work: not a sign of life.
         val thinking = (!delta.isNull("reasoning") && delta.optString("reasoning").isNotEmpty()) ||
             (delta.optJSONArray("reasoning_details")?.length() ?: 0) > 0
-        return Piece(text, null, alive = !text.isNullOrEmpty() || thinking)
+        return Piece(text, null, alive = !text.isNullOrEmpty() || thinking, usage = usage)
     }
 
     /** An answer that came back whole, as it did before streaming. */
@@ -387,7 +431,12 @@ object OpenRouter {
         me: String? = null,
         /** How they write (Person.theirStyleSummary). */
         theirStyle: String? = null,
+        /** What I said in other chats today (Me.elsewhereToday). */
+        elsewhere: String? = null,
     ): String = buildString {
+        // What stays the same from one question about this person to the next comes first, and
+        // what changes with every message after it: providers that keep the start of a prompt
+        // they have just seen (DeepSeek, Kimi and others) charge a fraction for that part.
         append(L.t("对方：", "Them: ")).append(peer).append('\n')
         val who = listOfNotNull(relationship?.takeIf { it.isNotBlank() }, closeness?.takeIf { it.isNotBlank() })
         if (who.isNotEmpty()) append(L.t("我和对方的关系：", "Relationship: ")).append(who.joinToString(" · ") { L.label(it) }).append('\n')
@@ -398,6 +447,7 @@ object OpenRouter {
         theirStyle?.let { append(L.t("Ta 平时的说话方式：", "How they usually write: ")).append(it).append('\n') }
         history?.let { append(L.t("我们最近几轮的走向：", "Where the last few turns went: ")).append(it).append('\n') }
         relation?.let { append(L.t("这段关系的长期观察：", "Long-term observations: ")).append(it).append('\n') }
+        elsewhere?.takeIf { it.isNotBlank() }?.let { append(L.t("\n我今天在别的聊天里说过：\n", "\nWhat I said in other chats today:\n")).append(it.trim()).append('\n') }
         append(L.t("\n最近的对话（从上到下；「我」是我发的，「对方」是 Ta 发的）：\n", "\nRecent messages (top to bottom; \"me\" is mine, \"them\" is theirs):\n"))
         transcript.forEach { (who, text) -> append(L.who(who)).append(L.t("：", ": ")).append(text).append('\n') }
         turn(transcript)?.let { append(it).append('\n') }

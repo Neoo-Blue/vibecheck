@@ -163,6 +163,8 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     /** The verdict Re-check took off the card, until its turn has been judged again. */
     private var recheckOf: Verdict? = null
     private var forceJudge = false
+    /** A burst of their messages is judged once it stops (see Judge.Settle). */
+    private val settled = Judge.Settle()
     private var failStreak = 0
     private var retryAt = 0L
     private var lastFailure = ""
@@ -200,6 +202,8 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         running = this
         prefs = Prefs(this)
         prefs.lang   // applies the UI language to L
+        // What each call used, added up per kind of call: shown under Tools.
+        OpenRouter.onUsage = prefs::addUsage
         people = PersonStore(this)
         card = OverlayCard(this, this, prefs) { imeBox()?.top }
         watched = prefs.packageList.toSet()
@@ -723,9 +727,13 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             inFlight = null
             quietFor = null
         }
-        val key = if (heldFor == id && !forceJudge) null
+        val read = if (heldFor == id && !forceJudge) null
             else Chat.triggerKey(bubbles) ?: (if (forceJudge) Chat.anyKey(bubbles) else null)
         val known = verdicts[id]
+        // Read by OCR, the same messages can come out a character apart from one frame to the
+        // next: still the turn already judged, not a new one to pay for.
+        val key = if (viaOcr && read != null && known != null && read != known.key &&
+            Chat.sameTurn(known.ctx.transcript, Chat.transcript(bubbles))) known.key else read
         val title = cardTitle(record, Relationship.pinned(record.rel))
         when {
             key != null && inFlight == "$id|$key" -> if (inFlight != quietFor) status(L.t("思考中…", "Thinking…"), anchor, "…", title)
@@ -740,8 +748,13 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             return
         }
         if (key == null || inFlight == "$id|$key") return
+        val forced = forceJudge
         forceJudge = false
         if (known?.key == key) return
+        // While they are still sending, wait: the burst is judged once, as a whole. Not on the
+        // way into a chat (what is there has stopped coming), nor when the card was asked for.
+        val settle = settled.wait("$id|$key", System.currentTimeMillis())
+        if (settle > 0 && !entering && !forced) { rescanSoon(settle + 50); return }
         if (inFlight != null) { rescanSoon(1500); return }   // judge it after the current call
         val now = System.currentTimeMillis()
         if (now < retryAt) {
@@ -1262,7 +1275,8 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             card.setSection(kind, waiting, true)
         }
         waitTick(kind, tag, v, title)
-        prefs.countUse(if (kind == REPLY) Prefs.USE_REPLY else Prefs.USE_DEEP)
+        val use = if (kind == REPLY) Prefs.USE_REPLY else Prefs.USE_DEEP
+        prefs.countUse(use)
         val c = v.ctx
         val system = if (kind == REPLY) OpenRouter.replySystem(prefs.adult) else OpenRouter.deepSystem(prefs.adult)
         // Neither thinks first. Drafts are wanted now; a deep read is three short lines, and
@@ -1290,7 +1304,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                 val ask = { m: String, prompt: String, pic: String? ->
                     val once = { p: String?, text: String ->
                         OpenRouter.chat(prefs.orKey, m, system, text, p, maxTokens = tokens, timeoutMs = deadline.quietMs.toInt(), think = think,
-                            onLine = { line -> main.post { deepPartial(kind, tag, v, title, line) } }, deadline = deadline)
+                            onLine = { line -> main.post { deepPartial(kind, tag, v, title, line) } }, deadline = deadline, kind = use)
                     }
                     runCatching { once(pic, prompt) }.recoverCatching { e ->
                         if (pic != null && OpenRouter.noImages(e)) once(null, prompt.replace(OpenRouter.SCREENSHOT_NOTE, "")) else throw e
@@ -1353,16 +1367,15 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         // More than the dozen lines a screen holds, when this chat's kept history lines up with
         // them. Drafts answer the last few, and get less of everything: they are asked for often.
         val lines = Archive.before(people.archive(c.own), c.transcript, if (drafts) REPLY_LINES else CONTEXT_LINES)
-        // What I am like, what I have been up to, what I said elsewhere today.
-        val about = if (!prefs.aboutMe) null else listOfNotNull(
-            Me.brief(me.profile, me.summaries(3), max = if (drafts) 500 else 900),
-            Me.elsewhereToday(me.lines(Me.day(System.currentTimeMillis())), c.name, max = if (drafts) 4 else 8)
-                ?.let { L.t("我今天在别的聊天里说过：\n", "What I said in other chats today:\n") + it },
-        ).joinToString("\n").ifBlank { null }
+        // What I am like and have been up to, which changes by the day; what I said elsewhere
+        // today, which changes by the minute and so goes further down (see deepPrompt).
+        val about = if (!prefs.aboutMe) null else Me.brief(me.profile, me.summaries(3), max = if (drafts) 500 else 900)
+        val elsewhere = if (!prefs.aboutMe) null
+            else Me.elsewhereToday(me.lines(Me.day(System.currentTimeMillis())), c.name, max = if (drafts) 4 else 8)
         var prompt = OpenRouter.deepPrompt(
             c.name, c.note, c.style, c.history, c.relation,
             lines, c.answers, c.viaOcr, hasImage, c.situation, c.relationship, c.closeness,
-            if (drafts) Profile.forDrafts(c.profile) else c.profile, about, c.theirStyle,
+            if (drafts) Profile.forDrafts(c.profile) else c.profile, about, c.theirStyle, elsewhere,
         )
         // Drafts in my voice: how I actually answered this person before, from the kept history.
         if (drafts) {
@@ -1826,13 +1839,14 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     ): Pair<String, Int> {
         // A long run of calls meets the odd dropped connection or busy moment: each call is tried
         // again after a pause, and only a failure that does not go away ends the write.
-        fun once(m: String, system: String, prompt: String, tokens: Int): String {
+        fun once(m: String, system: String, prompt: String, tokens: Int, think: OpenRouter.Think): String {
             var wait = 5_000L
             var tries = 0
             while (true) {
                 prefs.countUse(Prefs.USE_BIO)
                 try {
-                    return OpenRouter.chat(key, m, system, prompt, null, maxTokens = tokens, timeoutMs = 180_000, temperature = 0.4)
+                    return OpenRouter.chat(key, m, system, prompt, null, maxTokens = tokens, timeoutMs = 180_000, temperature = 0.4,
+                        think = think, kind = Prefs.USE_BIO)
                 } catch (e: Exception) {
                     if (++tries >= ASK_TRIES || !Judge.isTransient(e)) throw e
                     Diag.log("learn: ${Judge.describe(e)}; again in ${wait / 1000}s")
@@ -1841,17 +1855,20 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                 }
             }
         }
-        // And when the model set for Think still fails, the other one is asked the same.
-        fun ask(system: String, prompt: String, tokens: Int): String = try {
-            once(model, system, prompt, tokens)
+        // And when the model set for Think still fails, the other one is asked the same. Taking
+        // notes and merging them is writing down what is there: that is done without thinking
+        // first, which was most of what those calls cost. The profile itself, which weighs it all
+        // up, still thinks a little.
+        fun ask(system: String, prompt: String, tokens: Int, think: OpenRouter.Think = OpenRouter.Think.OFF): String = try {
+            once(model, system, prompt, tokens, think)
         } catch (e: Exception) {
             if (backup == null || !OpenRouter.worthAnotherModel(e)) throw e
             Diag.log("learn: $model failed (${Judge.describe(e)}); asking $backup")
-            once(backup, system, prompt, tokens)
+            once(backup, system, prompt, tokens, think)
         }
         if (chunks.size <= 1) {
             progress(Learning.Stage.FINAL, 0, 0)
-            return ask(Profile.profileSystem(false), Profile.profilePrompt(name, history, Archive.text(history), false), 5000) to 0
+            return ask(Profile.profileSystem(false), Profile.profilePrompt(name, history, Archive.text(history), false), 5000, OpenRouter.Think.LOW) to 0
         }
         val texts = chunks.map { Archive.text(history, it) }
         val hashes = texts.map { Archive.hash(it) }
@@ -1880,19 +1897,31 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             if (notes[i] != null) people.saveNotes(id, chunks.indices.filter { notes[it] != null }.associate { hashes[it] to notes[it]!! })
         }
         // Notes for stretches no longer in the history go.
-        people.saveNotes(id, chunks.indices.filter { notes[it] != null }.associate { hashes[it] to notes[it]!! })
+        val noted = chunks.indices.filter { notes[it] != null }.associate { hashes[it] to notes[it]!! }
+        people.saveNotes(id, noted)
         var layer = notes.filterNotNull()
         if (layer.isEmpty()) throw failure ?: IllegalStateException("no notes")
-        // More notes than one pass can take: merged a group at a time first.
+        // More notes than one pass can take: merged a group at a time first. Only the newest
+        // stretches change from one read to the next, so most groups are the same notes as last
+        // time: those merges are kept with the notes and not paid for again.
+        val merged = LinkedHashMap<String, String>()
         while (layer.size > 1 && layer.sumOf { it.length } > REDUCE_CHARS) {
             val groups = Profile.groups(layer, REDUCE_CHARS / 2)
             if (groups.size >= layer.size) break
             progress(Learning.Stage.MERGE, 0, 0)
-            layer = groups.map { g -> if (g.size == 1) g[0] else ask(Profile.MERGE_SYSTEM, Profile.mergePrompt(name, g), 3000) }
+            layer = groups.map { g ->
+                if (g.size == 1) g[0] else {
+                    val k = Profile.mergeKey(g)
+                    (cached[k] ?: ask(Profile.MERGE_SYSTEM, Profile.mergePrompt(name, g), 3000)).also {
+                        merged[k] = it
+                        people.saveNotes(id, noted + merged)
+                    }
+                }
+            }
         }
         val body = layer.withIndex().joinToString("\n\n") { (i, n) -> "--- ${i + 1} ---\n$n" }
         progress(Learning.Stage.FINAL, 0, 0)
-        return ask(Profile.profileSystem(true), Profile.profilePrompt(name, history, body, true), 5000) to notes.count { it == null }
+        return ask(Profile.profileSystem(true), Profile.profilePrompt(name, history, body, true), 5000, OpenRouter.Think.LOW) to notes.count { it == null }
     }
 
     private fun profileDone(id: String, total: Int, text: String, skipped: Int, open: Boolean = true) {
