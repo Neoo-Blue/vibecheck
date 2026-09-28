@@ -432,6 +432,9 @@ with what is actually on screen.
 
 ## Privacy
 
+Only the apps checked under Setup → Watch these apps are read, and only while one of them is
+what is on screen: an app you uncheck is left alone from that moment, its open chat included.
+
 Notifications from the watched apps are read only for the sender's name and message, kept in
 memory (the last 40) to name emoji-only contacts, and never stored or sent anywhere.
 
