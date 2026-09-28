@@ -278,7 +278,10 @@ takes seconds. Their page on the People tab deletes a kept history; forgetting a
 Then the profile. A long history is sent to your OpenRouter model in stretches of about 12,000
 characters, three at a time: notes on each stretch, then one profile from all the notes. Notes
 are cached by the stretch's content and saved as each one lands, so a later Learn pays only for
-what is new. The card shows how far it has got. Each call is tried again after a pause if the
+what is new. The card shows how far it has got: the step, a bar with the stretches done, the
+time taken and an estimate of what is left, redrawn every few seconds (the person's page in the
+app shows the same). Ten minutes with no sign of life and it says it looks stuck; Learn then
+starts it again, keeping the stretches already done. Each call is tried again after a pause if the
 connection drops, and a write that still loses its connection carries on by itself when you are
 back in that chat. The profile starts with what they are to you and how close you are, then
 sections: who they are, how you get along, how they talk, how you talk to them (both with

@@ -4,6 +4,38 @@ APKs for every version are on the [releases page](https://github.com/Neoo-Blue/v
 Each section below is also that release's notes: the Release workflow publishes the section whose
 heading matches the tag.
 
+## 6.8.3
+
+**You can see a profile being written.** Learn used to say 「还在整理上次读到的记录」 and nothing
+more for minutes: no telling a slow write from a stuck one, or whether to start again.
+- **Progress on the card.** The Learn panel shows:
+  - the step: notes on each stretch, merging, or the last step;
+  - a bar with the stretches done out of all of them;
+  - the messages kept, the time taken, and an estimate of what is left.
+  It is redrawn every 15 seconds while it runs, and tapping Learn during a write shows it instead
+  of the old line. Stretches are counted as each one comes back, so one slow stretch no longer
+  holds the count still.
+- **On the person's page too.** In the app the person's page shows the same progress, kept up to
+  date, and the page redraws itself with the new profile when it is done. The People list says
+  who is being written.
+- **Stuck is said, and fixed by Learn.** Ten minutes without any sign of life (longer than a call
+  and its retries ever take) and the panel says it looks stuck. Learn then starts the write again,
+  keeping the stretches already done; whatever the stuck one does afterwards is dropped.
+- **Quotes of mine are not theirs.** When they quote my message, WeChat puts 「my name：my words」
+  under theirs, and OCR often can't read my name (「A°😉：女大is no more」). A text like that whose
+  words are a message further up the screen is now left out, whoever's name is in front.
+
+中文：
+- **学习有进度了**：以前学习时只显示「还在整理上次读到的记录」，好几分钟看不出是慢还是卡住，也不知道要不要重来。
+- **卡片上显示进度**：
+  - 第几步：逐段整理、合并笔记，或者最后一步写成档案；
+  - 进度条：已整理几段、一共几段；
+  - 共存多少条、已用多久、预计还要多久。
+  写的过程中每 15 秒刷新一次；写的时候再点「学习」会直接显示进度。每段写完就计数，不会因为一段慢就一直不动。
+- **应用里也能看**：这个人的页面显示同样的进度，并自动刷新，写完后页面自动换成新档案；「人物」列表里会标出正在写档案的人。
+- **卡住会提示，点学习就能重来**：十分钟没有任何进展（比一次调用加上重试还久）会提示「好像卡住了」。这时再点「学习」会重新开始，已写好的段落不会重做，卡住的那次之后的结果会丢掉。
+- **引用我的话不再算成对方说的**：对方引用我的消息时，微信会在 Ta 的消息下面显示「我的名字：我的原话」，而 OCR 常常认不出我的名字（比如「A°😉：女大is no more」）。现在只要冒号后面的话和屏幕上方某条消息一样，不管前面是谁的名字，都不算消息。
+
 ## 6.8.2
 
 **Steadier, and the card keeps its title.**
