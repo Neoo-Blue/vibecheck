@@ -13,8 +13,6 @@ import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
 import android.text.Editable
@@ -61,8 +59,8 @@ class MainActivity : Activity() {
     private lateinit var people: PersonStore
     private val me by lazy { MeStore(this) }
     private val meLearner by lazy { MeLearner(me, people, prefs) }
-    private val io = Executors.newSingleThreadExecutor()
-    private val main = Handler(Looper.getMainLooper())
+    private val io = Executors.newSingleThreadExecutor(Crash.threads("vibecheck-app"))
+    private val main = Crash.mainHandler()
 
     // Setup fields, written back when leaving the screen or switching tabs.
     private lateinit var keyField: EditText
@@ -90,6 +88,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Crash.install(this)
         prefs = Prefs(this)
         prefs.lang   // applies the UI language to L before anything is built
         people = PersonStore(this)
@@ -414,7 +413,7 @@ class MainActivity : Activity() {
             ))
         }
         "diagnostics" -> tile(t, toolName(t), L.t("没有气泡时看这里。", "Look here when no bubble shows up.")) {
-            diagnostics = text("", 12f, sub()).also { it.typeface = Typeface.MONOSPACE; addView(it) }
+            diagnostics = text("", 12f, sub()).also { it.typeface = Typeface.MONOSPACE; it.setTextIsSelectable(true); addView(it) }
             addView(buttons(L.t("刷新", "Refresh") to { refreshDiagnostics() }))
             addView(switch(L.t("调试模式（只显示抓到的文本，不调用模型）", "Debug mode (show what is read, no model calls)"), prefs.debug) { prefs.debug = it })
             addView(switch(L.t("局域网排查接口（会暴露聊天内容，用完关掉）", "LAN debug endpoint (exposes chat content; switch off when done)"), prefs.remoteDiag) {
@@ -502,6 +501,8 @@ class MainActivity : Activity() {
         if (Diag.events == 0 && enabled) lines.add(L.t("事件为 0：多半是包名没对上，或服务需要关掉再打开一次。", "Zero events: usually the app list, or the service needs an off/on."))
         val log = Diag.dump().lines().takeLast(8).filter { it.isNotBlank() }
         if (log.isNotEmpty()) { lines.add(""); lines.addAll(log) }
+        // What went wrong last, kept across restarts: long-press to copy it and send it on.
+        Crash.last()?.let { lines.add(""); lines.add(L.t("上次出错（长按可复制）：", "Last crash (long-press to copy):")); lines.addAll(it.lines().take(16)) }
         d.text = lines.joinToString("\n")
     }
 
@@ -874,7 +875,8 @@ class MainActivity : Activity() {
     private fun nameLabel(id: String, sp: Float): CharSequence {
         val picture = people.namePicture(id) ?: return people.shownName(id)
         val px = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, sp * 1.3f, resources.displayMetrics).toInt()
-        val d = BitmapDrawable(resources, picture).apply { setBounds(0, 0, px * picture.width / picture.height.coerceAtLeast(1), px) }
+        val (w, h) = Person.pictureSize(picture.width, picture.height, px)
+        val d = BitmapDrawable(resources, picture).apply { setBounds(0, 0, w, h) }
         return SpannableStringBuilder("\uFFFC").apply { setSpan(ImageSpan(d, ImageSpan.ALIGN_BOTTOM), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) }
     }
 

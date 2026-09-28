@@ -4,6 +4,45 @@ APKs for every version are on the [releases page](https://github.com/Neoo-Blue/v
 Each section below is also that release's notes: the Release workflow publishes the section whose
 heading matches the tag.
 
+## 6.8.2
+
+**Steadier, and the card keeps its title.**
+- **No more crashing out.** An exception anywhere used to end the whole service: the bubble
+  vanished, then came back when Android restarted it. Now:
+  - background work logs what went wrong and carries on;
+  - so does anything run on the main thread (a screen read, an answer landing, a tap on the card);
+  - a deep read or reply whose prompt can't be built says so on the card, instead of dying with
+    it still showing "Thinking…";
+  - a profile write that fails anywhere ends properly, instead of leaving the person "still
+    writing" and the screen kept on;
+  - a judgment whose answer never came back is let go after three minutes, instead of holding up
+    every later one.
+- **The last crash is kept.** Tools → Diagnostics shows what went wrong last, where and when.
+  Long-press to copy it.
+- **The card no longer loses its title to "…".** An emoji name is shown as a picture cut from the
+  title bar. When a photo sat right under the title bar, a thin strip of it was cut out as the
+  name, so wide that the title shrank to "…" and the card looked like an old version. The name is
+  now the shape at the middle of the bar, and never one that runs off the strip's edge. A picture
+  that is not the shape of a name is not kept, and one kept before is thrown away and taken again.
+  Pictures are drawn at most four times as wide as they are tall.
+- **The card no longer pops open on its own** when a profile write that lost its connection picks
+  itself up again: only a read you started opens it.
+- **Call records are gone from kept history too.** A 「已取消」 or "Canceled" read as a message
+  before 6.8.1 no longer reaches profiles and drafts. The profile is rewritten the next time you
+  learn the person.
+
+中文：
+- **不再闪退**：以前任何地方出错都会让整个服务退出，气泡消失，等 Android 重启服务后卡片又重新冒出来。现在：
+  - 后台出错会记下来，接着运行；
+  - 主线程上出错（读屏幕、结果回来、点卡片）也一样；
+  - 深思或回复的提示词没拼成时，卡片上直接显示失败，不再一直「思考中…」；
+  - 写档案中途出错会正常结束，不会一直显示「还在写」、屏幕也不会一直亮着；
+  - 判断三分钟没回来就放弃，不再卡住后面所有判断。
+- **记下上次出错**：「工具 → 诊断」里能看到上次出错的时间、位置和原因，长按可以复制。
+- **卡片标题不再变成「…」**：emoji 名字是从标题栏截的图。标题栏下面正好有照片时，会把照片的一条边截成名字，宽到标题只剩「…」，卡片看起来就像旧版界面。现在只截标题栏正中间的图形，碰到截取范围边缘的不算。形状不像名字的图不保留，以前存下的错图会删掉重截。图最宽只画到高度的四倍。
+- **卡片不再自己弹开**：断网没写完的档案，回到聊天时会自动接着写，这时卡片不会自己弹开；只有你自己点的学习才会弹开。
+- **存档里的通话记录也去掉了**：6.8.1 之前被当成消息存下来的「已取消」「Canceled」，不再进入档案和回复。下次学习这个人时，档案会重新写。
+
 ## 6.8.1
 
 **Who said what, read right.**

@@ -9,8 +9,6 @@ import android.graphics.Rect
 import android.graphics.Typeface
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.GradientDrawable
-import android.os.Handler
-import android.os.Looper
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.TextUtils
@@ -82,7 +80,7 @@ class OverlayCard(
     class Section(val title: String, val lines: List<String>, val pickable: Boolean = false, val read: String? = null)
 
     private val wm = svc.getSystemService(WindowManager::class.java)
-    private val main = Handler(Looper.getMainLooper())
+    private val main = Crash.mainHandler()
     private fun dp(v: Int) = (v * svc.resources.displayMetrics.density).toInt()
 
     private var cardRoot: ScrollView? = null
@@ -303,8 +301,9 @@ class OverlayCard(
             gravity = Gravity.CENTER
             elevation = dp(3).toFloat()
             // Click and long-click go through the listeners, so TalkBack's double-tap works too.
-            setOnClickListener { onBubbleTap() }
-            setOnLongClickListener { onBubbleLongPress(); true }
+            // Whatever a tap sets off is caught: one bad answer must not take the service down.
+            setOnClickListener { Crash.guard("card") { onBubbleTap() } }
+            setOnLongClickListener { Crash.guard("card") { onBubbleLongPress() }; true }
         }
         styleBubble(v)
         v.setOnTouchListener(BubbleTouch())
@@ -558,14 +557,20 @@ class OverlayCard(
         })
     }
 
-    /** The title, with the picture of an unreadable name where [NAME_PICTURE] stands. */
+    /**
+     * The title, with the picture of an unreadable name where [NAME_PICTURE] stands. The picture
+     * is at most [Person.PICTURE_MAX_RATIO] times as wide as it is tall, shrunk to fit: a wide one
+     * (a strip of a photo under the title bar, cut out as the name) filled the whole line, and the
+     * title read "…".
+     */
     private fun titleText(t: String, sp: Float): CharSequence {
         val at = t.indexOf(NAME_PICTURE)
         if (at < 0) return t
         val picture = actions.namePicture()
             ?: return t.replace(NAME_PICTURE.toString(), L.t("未命名联系人", "Unnamed contact"))
         val px = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, sp * 1.35f, svc.resources.displayMetrics).toInt()
-        val d = BitmapDrawable(svc.resources, picture).apply { setBounds(0, 0, px * picture.width / picture.height.coerceAtLeast(1), px) }
+        val (w, h) = Person.pictureSize(picture.width, picture.height, px)
+        val d = BitmapDrawable(svc.resources, picture).apply { setBounds(0, 0, w, h) }
         return SpannableString(t).apply { setSpan(ImageSpan(d, ImageSpan.ALIGN_BOTTOM), at, at + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) }
     }
 
@@ -637,15 +642,15 @@ class OverlayCard(
         orientation = LinearLayout.VERTICAL
         addView(spacer(dp(6)))
         addView(line(sec.title, 12f * s, p.title, dp(3), bold = true))
-        sec.read?.let { r -> addView(line(r, 12f * s, p.body, dp(5)).apply { setOnLongClickListener { actions.onCopy(r); true } }) }
+        sec.read?.let { r -> addView(line(r, 12f * s, p.body, dp(5)).apply { setOnLongClickListener { Crash.guard("card") { actions.onCopy(r) }; true } }) }
         for (l in sec.lines) {
             val tv = line(l, 12f * s, p.body, dp(5))
-            tv.setOnLongClickListener { actions.onCopy(l); true }
+            tv.setOnLongClickListener { Crash.guard("card") { actions.onCopy(l) }; true }
             if (sec.pickable) {
                 tv.setTextColor(p.title)
                 tv.setPadding(dp(10), dp(8), dp(10), dp(8))
                 tv.background = rounded(p.pick, dp(8))
-                tv.setOnClickListener { actions.onPick(l) }
+                tv.setOnClickListener { Crash.guard("card") { actions.onPick(l) } }
             }
             addView(tv)
         }
@@ -709,7 +714,7 @@ class OverlayCard(
         setTextColor(p.chipText)
         setPadding(dp(12), dp(6), dp(12), dp(6))
         background = rounded(p.chip, dp(8))
-        setOnClickListener { onClick() }
+        setOnClickListener { Crash.guard("card") { onClick() } }
     }
 
     private fun iconChip(text: String, description: String, p: Palette, s: Float, onClick: () -> Unit) =

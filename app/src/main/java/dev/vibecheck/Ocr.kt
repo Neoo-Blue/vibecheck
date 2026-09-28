@@ -17,24 +17,36 @@ object Ocr {
         TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
     }
 
-    /** Block-level results: one entry per recognized paragraph, with its box in screen pixels. */
+    /**
+     * Block-level results: one entry per recognized paragraph, with its box in screen pixels.
+     * [onResult] runs on the main thread, and what it throws is logged rather than ending the
+     * service (see [Crash]).
+     */
     fun read(bmp: Bitmap, onResult: (List<Pair<String, Chat.Box>>) -> Unit) {
         val started = System.currentTimeMillis()
-        recognizer.process(InputImage.fromBitmap(bmp, 0))
-            .addOnSuccessListener { text ->
-                val items = text.textBlocks.mapNotNull { block ->
-                    val r = block.boundingBox ?: return@mapNotNull null
-                    val line = block.text.replace('\n', ' ').trim()
-                    if (line.isEmpty()) null else line to Chat.Box(r.left, r.top, r.right, r.bottom)
+        val task = try {
+            recognizer.process(InputImage.fromBitmap(bmp, 0))
+        } catch (e: Exception) {
+            Crash.caught("ocr", e)
+            onResult(emptyList())
+            return
+        }
+        task.addOnSuccessListener { text ->
+                Crash.guard("ocr") {
+                    val items = text.textBlocks.mapNotNull { block ->
+                        val r = block.boundingBox ?: return@mapNotNull null
+                        val line = block.text.replace('\n', ' ').trim()
+                        if (line.isEmpty()) null else line to Chat.Box(r.left, r.top, r.right, r.bottom)
+                    }
+                    Diag.log("ocr: ${items.size} blocks in ${System.currentTimeMillis() - started}ms")
+                    onResult(items)
                 }
-                Diag.log("ocr: ${items.size} blocks in ${System.currentTimeMillis() - started}ms")
-                onResult(items)
             }
             .addOnFailureListener {
                 // Usually the model is still downloading, or Play services is missing altogether.
                 Diag.lastError = "ocr: ${it.message} (needs Google Play services and its OCR model)"
                 Diag.log(Diag.lastError)
-                onResult(emptyList())
+                Crash.guard("ocr") { onResult(emptyList()) }
             }
     }
 }
