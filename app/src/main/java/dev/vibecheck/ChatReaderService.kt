@@ -678,11 +678,16 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             ?: (if (Person.isTyping(lastTitles)) lastPeerName?.takeIf { activeId != null } else unreadableName(read))
             ?: UNKNOWN
         lastPeerName = name
-        // A quote is someone's earlier words, not a new message: theirs under my reply (by their
-        // name), or anyone's whose words are further up the screen.
-        val bubbles = Chat.withoutEchoes(if (name == UNKNOWN || Person.isFingerprint(name)) read else Chat.withoutQuotes(read, name))
-        if (bubbles.isEmpty()) { inconclusive("only quotes"); return }
         val record = people.load(targetPkg, name)
+        // A quote is someone's earlier words, not a new message: theirs under my reply, mine under
+        // theirs. Known by the name it starts with (theirs, or mine as their quotes of my words have
+        // spelled it), or by its words, which repeat a message further up or among the newest kept.
+        // An unreadable name shares one record between people: no history of theirs to go by.
+        val kept = if (name == UNKNOWN) emptyList() else record.tail
+        val names = if (name == UNKNOWN) people.myNames(targetPkg) else people.quoteNames(record.own)
+        if (name != UNKNOWN) Chat.myQuotedNames(read, kept, names).forEach { people.rememberMyName(targetPkg, it) }
+        val bubbles = Chat.withoutEchoes(Chat.withoutQuotes(read, names + people.myNames(targetPkg), Person.isFingerprint(name)), kept)
+        if (bubbles.isEmpty()) { inconclusive("only quotes"); return }
         val id = record.id
         // Someone known only by a fingerprint: the picture of their name is how they are shown,
         // and how their chat is found when none of their messages is on screen. Kept only from a
@@ -1574,8 +1579,12 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             if (!learning) return@captureBubbles
             // Within a page bubbles run oldest→newest; a page reached by scrolling up is older
             // than everything already kept, so what is not in the overlap goes to the front.
-            // Their message quoted under my reply is theirs: left out, not kept as mine.
-            val shown = Chat.withoutEchoes(if (Person.isFingerprint(learnName)) bubbles else Chat.withoutQuotes(bubbles, learnName))
+            // Their message quoted under my reply is theirs, and mine quoted under theirs is mine:
+            // left out, not kept as the replier's. What is not known for one now is taken out when
+            // the history is read back (Archive.withoutQuotes), with the whole of it to go by.
+            val names = people.quoteNames(learnOwn)
+            Chat.myQuotedNames(bubbles, emptyList(), names).forEach { people.rememberMyName(learnPkg, it) }
+            val shown = Chat.withoutEchoes(Chat.withoutQuotes(bubbles, people.quoteNames(learnOwn), Person.isFingerprint(learnName)))
             val page = shown.map { (if (it.incoming) "对方" else "我") to it.text }
             val fresh = Chat.freshLines(learnHistory, page)
             learnHistory.addAll(0, fresh)

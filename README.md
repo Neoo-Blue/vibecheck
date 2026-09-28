@@ -412,8 +412,16 @@ with what is actually on screen.
 - The status labels apps print inside the list (Seen, Delivered, SMS · Now, Active now, call
   records such as 已取消 / 对方无应答 / Canceled, voice-message lengths even with the sound-wave
   icon read as 「3" ((」, reactions) are filtered by
-  known patterns; anything new will leak into the context. A quote of their message under my
-  reply (「Name：…」) is not a message.
+  known patterns; anything new will leak into the context.
+- A quote under or over a reply (「Name：…」) is not a message, whoever's words it quotes. It is
+  recognised by:
+  - its name: theirs, or yours as their quotes of your words have spelled it, which the app
+    remembers per app;
+  - a name OCR cannot read (an emoji);
+  - a quoted picture (「Name：[图片]」);
+  - its words, when they repeat a message on screen or among the newest kept.
+  Messenger's and Instagram's "Sam replied to you" and the faded message under it are left out
+  too. Quotes kept as messages by earlier versions are taken out when the history is read.
 - No view ids are used anywhere (WeChat renames them every release): only TextView + text +
   screen position + long-clickability.
 - Judging sees only **messages visible on screen**, at most the last 12. Deep reads and reply

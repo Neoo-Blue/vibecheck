@@ -122,7 +122,7 @@ class PersonStore(ctx: Context) {
             model = Learner.load(sp.getString("$id:learn", "") ?: ""),
             history = Person.loadHistory(sp.getString("$id:hist", "") ?: ""),
             stats = Relation.load(sp.getString("$id:stats", "") ?: ""),
-            tail = Archive.withoutStrips(Person.loadTail(sp.getString("$id:tail", "") ?: "")),
+            tail = Archive.withoutQuotes(Archive.withoutStrips(Person.loadTail(sp.getString("$id:tail", "") ?: "")), quoteNames(own), emojiNamed(own)),
             legacySeen = sp.getString("$id:seen", "") ?: "",
             bio = bio,
             learned = sp.getInt("$id:learned", 0),
@@ -385,10 +385,41 @@ class PersonStore(ctx: Context) {
     fun archive(own: String): List<Pair<String, String>> =
         runCatching {
             file(own).takeIf { it.exists() }?.readText()?.let { text ->
-                // Kept before they were known not to be messages: call records (「已取消」, "Canceled O"), voice lengths.
-                Archive.withoutStrips(Archive.decode(text)).filterNot { Chat.isNotification(it.second) }
+                // Kept before they were known not to be messages: call records (「已取消」, "Canceled O"),
+                // voice lengths, and quotes kept as the replier's own words.
+                Archive.withoutQuotes(Archive.withoutStrips(Archive.decode(text)), quoteNames(own), emojiNamed(own))
+                    .filterNot { Chat.isNotification(it.second) }
             }
         }.getOrNull() ?: emptyList()
+
+    /**
+     * The names quotes in the chat [own] start with: theirs as its title reads, the one given
+     * them, and mine in that app (see [myNames]).
+     */
+    fun quoteNames(own: String): List<String> {
+        val pkg = own.substringBefore('|')
+        val name = own.substringAfter('|')
+        return listOfNotNull(name.takeUnless { Person.isFingerprint(it) }, aliasOf(own).takeIf { it.isNotBlank() }) + myNames(pkg)
+    }
+
+    /** The chat [own] is named by a fingerprint: its title is an emoji name OCR cannot read. */
+    fun emojiNamed(own: String): Boolean = Person.isFingerprint(own.substringAfter('|'))
+
+    /**
+     * My own name in [pkg], as its quotes of my messages spell it (Chat.myQuotedNames), newest
+     * last. A quote of my words that starts with one of these is mine, even with my message long
+     * off screen.
+     */
+    fun myNames(pkg: String): List<String> =
+        (sp.getString("mynames:$pkg", "") ?: "").split('\n').filter { it.isNotBlank() }
+
+    fun rememberMyName(pkg: String, name: String) {
+        val names = myNames(pkg)
+        if (names.any { Chat.sameName(it, name) }) return
+        // A few: a name changed now and then, or read a little differently by OCR.
+        sp.edit().putString("mynames:$pkg", (names + name.trim()).takeLast(5).joinToString("\n")).apply()
+        Diag.log("my name in $pkg: $name")
+    }
 
     /** Everything kept for a person: their chat's history and every linked chat's. */
     fun archiveAll(id: String): List<Pair<String, String>> {
