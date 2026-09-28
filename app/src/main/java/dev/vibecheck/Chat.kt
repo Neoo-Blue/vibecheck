@@ -107,8 +107,15 @@ object Chat {
         RegexOption.IGNORE_CASE,
     )
 
-    /** The length printed beside a voice message: 5", 12″, 59”. */
-    private val VOICE = Regex("""\d{1,2}\s*(["″”“]|'')""")
+    /** What OCR makes of a voice message's sound-wave icon: brackets, dots, a stray letter. */
+    private const val WAVE = """(?:[^\p{L}\p{N}]|[CcOo])"""
+
+    /**
+     * A voice message: its length (5", 12″, 59”), with the sound-wave icon beside it read as
+     * brackets and dots (「3" ((」「4"(。」「2"(•」). Kept as messages, those became "likes abstract
+     * emoticons and brackets" in a profile.
+     */
+    private val VOICE = Regex("""$WAVE{0,6}\d{1,2}\s*(["″”“]|'')$WAVE{0,6}""")
 
     /** WeChat toasts, call records, voice lengths, reactions and system notices are not conversation. */
     fun isNotification(text: String): Boolean {

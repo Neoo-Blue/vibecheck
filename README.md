@@ -401,7 +401,8 @@ with what is actually on screen.
   level with it. The lines of a link card follow its title. Soul has no documented view
   structure and may need adjusting on a new version.
 - The status labels apps print inside the list (Seen, Delivered, SMS · Now, Active now, call
-  records such as 已取消 / 对方无应答 / Canceled, voice-message lengths, reactions) are filtered by
+  records such as 已取消 / 对方无应答 / Canceled, voice-message lengths even with the sound-wave
+  icon read as 「3" ((」, reactions) are filtered by
   known patterns; anything new will leak into the context. A quote of their message under my
   reply (「Name：…」) is not a message.
 - No view ids are used anywhere (WeChat renames them every release): only TextView + text +

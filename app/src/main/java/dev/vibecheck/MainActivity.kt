@@ -754,12 +754,12 @@ class MainActivity : Activity() {
         })
 
         // Who, where, and what they are to you.
-        addView(tile(null, people.shownName(id), r.apps.joinToString(" · ") { Apps.label(it) }) {
-            people.namePicture(id)?.let {
-                addView(text("", 14f, fg()).apply {
-                    text = SpannableStringBuilder(L.t("聊天标题上是：", "The chat title shows: ")).append(nameLabel(id, 20f))
-                })
-            }
+        // A name that could only be seen (emoji OCR cannot read) is shown as its picture, not as
+        // "Unnamed contact": it is the name, just not in letters.
+        val picture = people.namePicture(id)
+        addView(tile(null, people.shownName(id), r.apps.joinToString(" · ") { Apps.label(it) }, label = picture?.let { nameLabel(id, 22f) }) {
+            if (picture != null) addView(text(L.t("名字是表情，读不成文字，所以用聊天标题的截图。想要文字名字，在下面「名字和专属背景」里起一个。",
+                "The name is emoji, which can't be read as text, so the chat title's picture stands for it. For a name in words, give one under Name and context below."), 13f, sub()))
             if (r.muted) addView(text(L.t("已暂停：不解读，也不记录。", "Paused: not judged, nothing recorded."), 13f, warn()).apply { setPadding(0, dp(4), 0, 0) })
             lateinit var relPill: TextView
             lateinit var closePill: TextView
@@ -1097,7 +1097,8 @@ class MainActivity : Activity() {
     }
 
     /** A card with a title; with [hideId] it also gets a Hide button that tucks it away. */
-    private fun tile(hideId: String?, title: String, desc: String? = null, body: LinearLayout.() -> Unit): View =
+    /** A titled card. [label] is shown in place of [title] when given (a name that is a picture). */
+    private fun tile(hideId: String?, title: String, desc: String? = null, label: CharSequence? = null, body: LinearLayout.() -> Unit): View =
         LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(12), dp(16), dp(14))
@@ -1106,7 +1107,7 @@ class MainActivity : Activity() {
             val head = LinearLayout(this@MainActivity).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                addView(text(title, 16f, fg(), bold = true), LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+                addView(text(title, 16f, fg(), bold = true).apply { if (label != null) text = label }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
                 if (hideId != null) addView(text(L.t("隐藏", "Hide"), 13f, accent()).apply {
                     setPadding(dp(10), dp(6), dp(4), dp(6))
                     contentDescription = L.t("隐藏「$title」", "Hide $title")
