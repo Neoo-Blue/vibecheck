@@ -58,6 +58,8 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         val profile: String,
         /** The chat on screen, whose kept history lines up with [transcript]. */
         val own: String,
+        /** How they write: what is normal for them (Person.theirStyleSummary). */
+        val theirStyle: String? = null,
     )
 
     /**
@@ -121,6 +123,8 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     private var lastDescs = listOf<String>()
     /** Fingerprints from the last OCR pass: their avatar (when one of their messages shows) and the title bar. */
     private var lastAvatarHash = ""
+    /** The inside of their avatar ([Person.insideHash]): the same in light and in dark mode. */
+    private var lastAvatarInside = ""
     private var lastTitleHash = ""
     /** The name the last conversation was read under, for the moments a typing indicator hides it. */
     private var lastPeerName: String? = null
@@ -130,6 +134,8 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     private var onHomeScreen = false
     private var hasInput = false
     private var lastProbe = 0L
+    /** When the last screenshot was asked for (uptime): see [captureChat]. */
+    private var lastShotAt = -SHOT_GAP_MS
     private var ocrBusy = false
     /** Bumped on every screen change in the watched app; a capture of an older screen is dropped. */
     private var screenGen = 0
@@ -278,6 +284,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             screenGen++
             unsettled = true
             forceJudge = false
+            emptyReads = 0
             main.removeCallbacks(foreignCheck)
             main.post { abortLearning("page changed"); card.suspend() }
         }
@@ -420,12 +427,54 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         // Fingerprints belong to the OCR pass that made them: an old one would name this chat
         // after whichever chat was captured last.
         lastAvatarHash = ""
+        lastAvatarInside = ""
         lastTitleHash = ""
         lastNamePicture = null
         handle(bubbles)
     }
 
     private val ocrWatchdog = Runnable { ocrBusy = false }
+
+    /** People whose way of writing has been read from their kept history in this run; see [backfillTheirStyle]. */
+    private val styleBackfilled = HashSet<String>()
+
+    /**
+     * Someone learned before their way of writing was kept: it is read once from the history on
+     * the phone, in the background, rather than starting from nothing.
+     */
+    private fun backfillTheirStyle(record: PersonStore.Record) {
+        val id = record.id
+        if (record.theirStyle.msgs > 0 || id in styleBackfilled || people.archiveCount(id) == 0) return
+        styleBackfilled += id
+        profileIo.execute {
+            val theirs = Person.Style()
+            runCatching { people.archiveAll(id) }.getOrDefault(emptyList())
+                .filter { it.first != "我" }.forEach { Person.observe(theirs, it.second) }
+            if (theirs.msgs == 0) return@execute
+            main.post {
+                val r = people.loadId(id)
+                if (theirs.msgs > r.theirStyle.msgs) { r.theirStyle = theirs; people.save(r) }
+            }
+        }
+    }
+
+    /** Reads in a row that saw nothing; see [inconclusive]. */
+    private var emptyReads = 0
+
+    /**
+     * A read that saw nothing (a screenshot Android refused, a frame caught mid-animation) says
+     * nothing about where we are. It used to put the card away until the next screen change,
+     * and in a chat where nothing moved that meant until you scrolled: the card seemed to vanish.
+     * Now the card stays as it is and the screen is read again in a moment, a few times; only
+     * then does the card go, until the screen changes. Not leaving the chat either way, or the
+     * next screen would count as freshly opened and its history as new messages.
+     */
+    private fun inconclusive(why: String) {
+        emptyReads++
+        Diag.log("scan: $why ($emptyReads)")
+        if (emptyReads <= EMPTY_RETRIES) { rescanSoon(SHOT_GAP_MS + 200); return }
+        card.suspend()
+    }
 
     private fun ocrDone() {
         ocrBusy = false
@@ -451,7 +500,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                 main.post {
                     ocrDone()
                     Diag.shotProbe = "$targetPkg → $note"
-                    if (gen == screenGen) handle(emptyList())
+                    if (gen == screenGen) inconclusive("capture $note")
                 }
                 return@captureChat
             }
@@ -478,6 +527,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                 )
                 val covered = Person.titleCovered(over + exclude, win)
                 val avatar = avatarPrint(shot.bmp, win, found, over + exclude)?.let { Person.hashOf(it) }.orEmpty()
+                val inside = avatarPrint(shot.bmp, win, found, over + exclude, inside = true)?.let { Person.insideHash(it) }.orEmpty()
                 val title = if (covered) "" else Person.hashOf(titlePrint(shot.bmp))
                 // No name to read in the title bar: keep a picture of it (the emoji the name is made of).
                 val picture = if (!covered && titles.none { Person.looksLikeName(it.first) } && !Person.isTyping(titles)) namePicture(shot.bmp) else null
@@ -486,6 +536,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                 onHomeScreen = Chat.looksLikeHomeScreen(placed, win)
                 hasInput = false
                 lastAvatarHash = avatar
+                lastAvatarInside = inside
                 lastTitleHash = title
                 lastNamePicture = picture
                 lastWindow = win
@@ -584,13 +635,8 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             (read.lastOrNull()?.let { (if (it.incoming) L.t("对方 ", "them ") else L.t("我 ", "me ")) + it.text.take(30) } ?: L.t("无", "none"))
 
         if (prefs.debug) { debugCard(read); return }
-        if (read.isEmpty()) {
-            // Nothing read at all (a failed capture, a frame caught mid-animation) says nothing
-            // about where we are: put the card away for now, but this is not leaving the chat,
-            // or the next screen would count as freshly opened and its history as new messages.
-            card.suspend()
-            return
-        }
+        if (read.isEmpty()) { inconclusive("nothing read"); return }
+        emptyReads = 0
         // The chat list is also full of names and text; judging it would be nonsense.
         if (onHomeScreen || !Chat.inConversation(read, hasInput)) {
             activeId = null
@@ -611,15 +657,19 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         // A quote is someone's earlier words, not a new message: theirs under my reply (by their
         // name), or anyone's whose words are further up the screen.
         val bubbles = Chat.withoutEchoes(if (name == UNKNOWN || Person.isFingerprint(name)) read else Chat.withoutQuotes(read, name))
-        if (bubbles.isEmpty()) { card.suspend(); return }
+        if (bubbles.isEmpty()) { inconclusive("only quotes"); return }
         val record = people.load(targetPkg, name)
         val id = record.id
+        // One person split in two by a change between light and dark mode: put back together
+        // before anything is counted into the wrong half, and the screen read again.
+        if (Person.isFingerprint(record.name) && lastNamePicture?.let { mergeLookalike(record, it) } == true) { rescanSoon(); return }
         // Someone known only by a fingerprint: the picture of their name is how they are shown.
         if (Person.isFingerprint(record.name) && record.alias.isBlank()) lastNamePicture?.let { considerNamePicture(id, it) }
         nameFromNotifications(record, bubbles)
         val entering = activeId != id
         activeId = id
         currentRecord = record
+        backfillTheirStyle(record)
         val anchor = bubbles.last().box.toRect()
 
         if (cardFor != id) {
@@ -773,6 +823,10 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             source = if (ocr) OCR_CAVEAT else null,
             relationship = rel,
             closeness = close,
+            // What is normal for this person, learned message by message and turn by turn: the
+            // reading of each turn gets more theirs the longer you talk.
+            theirStyle = Person.theirStyleSummary(record.theirStyle),
+            usual = Person.normSummary(record.norm),
         )
         val triageBody = Jev.triageBody(state, askSituation = rel == null)
         // This record copy is not touched again (the answer is applied to a fresh load), so the
@@ -851,7 +905,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                 displayName(record), record.note.ifBlank { if (record.bio.isBlank()) prefs.context else "" },
                 Person.styleSummary(record.style), Person.historySummary(record.history),
                 Relation.summary(record.stats), transcript, learned.answers, ocr, situation, rel,
-                Relationship.closeness(record.close), record.bio, own,
+                Relationship.closeness(record.close), record.bio, own, Person.theirStyleSummary(record.theirStyle),
             )
             val danger = learned.answers["danger"] as? Jev.Answer.Scored
             val risk = (Jev.risk(learned.answers) ?: 0.0).toFloat()
@@ -989,6 +1043,9 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         // The relationship the turn was judged as: known, or this turn's answer.
         val sit = situation.ifBlank { "*" }
         if (before == null) Relation.judged(record.stats, calibrated)
+        // What is usual for them moves with every new turn (not with a second reading of one),
+        // on Jev's own reading, so the next turn is read against how they usually come across.
+        if (before == null) Person.observeNorm(record.norm, intent, rawNorm)
         var adjusted = false
         var recorded = false
         (raw["action"] as? Jev.Answer.Dist)?.let { dist ->
@@ -1034,6 +1091,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             if (sync.aligned) people.appendArchive(record.own, sync.fresh)
             val fresh = bubbles.takeLast(sync.fresh.size)
             fresh.filter { !it.incoming }.forEach { Person.observe(record.style, it.text) }
+            fresh.filter { it.incoming }.forEach { Person.observe(record.theirStyle, it.text) }
             val now = System.currentTimeMillis()
             Relation.observe(record.stats, fresh, now, live = sync.aligned, tzOffsetMs = TimeZone.getDefault().getOffset(now).toLong())
             // Across every chat, what is said as it happens goes into the day log: what I did today,
@@ -1207,20 +1265,21 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         prefs.countUse(if (kind == REPLY) Prefs.USE_REPLY else Prefs.USE_DEEP)
         val c = v.ctx
         val system = if (kind == REPLY) OpenRouter.replySystem(prefs.adult) else OpenRouter.deepSystem(prefs.adult)
-        // Drafts are wanted now: the fast model, no thinking. A deep read can take its time.
-        val think = if (kind == REPLY) OpenRouter.Think.OFF else OpenRouter.Think.LOW
+        // Neither thinks first. Drafts are wanted now; a deep read is three short lines, and
+        // thinking before them took a minute or more and cost several times the answer. A model
+        // that cannot skip it is asked again with a little (see OpenRouter.chat).
+        val think = OpenRouter.Think.OFF
         val send = { image: String? ->
             val model = if (kind == REPLY || image != null) prefs.fastModel else prefs.deepModel
             // The other model set in Setup stands in when this one fails (see Models.backup).
             val backup = Models.backup(model, prefs.fastModel, prefs.deepModel)
-            // A deep read thinks first, and the thinking counts against the answer's room: 2,500
-            // tokens could all go on it and leave "the model stopped before answering".
-            val tokens = if (kind == REPLY) 2500 else 4000
+            // A read and three drafts, or three lines: this is room to spare, and a cap on a model
+            // that runs on.
+            val tokens = if (kind == REPLY) 1200 else 1000
             // A model stuck in a provider's queue, or gone quiet mid-answer, is given up on and the
-            // backup asked. Drafts do not think and are wanted in seconds; a deep read thinks first,
-            // and some providers send nothing while it does.
+            // backup asked; some providers send nothing while a model that must think does.
             val deadline = if (kind == REPLY) OpenRouter.Deadline(quietMs = 40_000, answerMs = 75_000, totalMs = 150_000)
-            else OpenRouter.Deadline(quietMs = 90_000, answerMs = 180_000, totalMs = 300_000)
+            else OpenRouter.Deadline(quietMs = 60_000, answerMs = 120_000, totalMs = 200_000)
             deepIo.execute {
                 // Whatever goes wrong, building the prompt included, ends up on the card as a
                 // failure: the panel must never be left saying "Thinking…".
@@ -1273,7 +1332,10 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         }
         // A picture of a different chat, or of this one scrolled back into its history after a read,
         // would contradict the transcript, so only while this chat's messages are on screen.
-        if (c.viaOcr && activeId == v.personId && heldFor != v.personId) captureChat(hideOverlay = true) { shot, note ->
+        // Only a deep read, asked for, takes a screenshot along: for drafts the text is enough, and
+        // the picture cost more than the rest of the question put together and hid the card while
+        // it was taken.
+        if (kind == DEEP && c.viaOcr && activeId == v.personId && heldFor != v.personId) captureChat(hideOverlay = true) { shot, note ->
             // A picture that cannot be made is left out, rather than the question never being sent.
             val jpeg = shot?.let { runCatching { toJpegBase64(it.bmp) }.also { _ -> it.bmp.recycle() }.getOrNull() }
             if (jpeg == null) Diag.log("deep: no image, $note")
@@ -1287,25 +1349,28 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
      */
     private fun deepPromptFor(kind: String, v: Verdict, hasImage: Boolean): String {
         val c = v.ctx
-        // More than the dozen lines a screen holds, when this chat's kept history lines up with them.
-        val lines = Archive.before(people.archive(c.own), c.transcript, CONTEXT_LINES)
+        val drafts = kind == REPLY
+        // More than the dozen lines a screen holds, when this chat's kept history lines up with
+        // them. Drafts answer the last few, and get less of everything: they are asked for often.
+        val lines = Archive.before(people.archive(c.own), c.transcript, if (drafts) REPLY_LINES else CONTEXT_LINES)
         // What I am like, what I have been up to, what I said elsewhere today.
         val about = if (!prefs.aboutMe) null else listOfNotNull(
-            Me.brief(me.profile, me.summaries(3)),
-            Me.elsewhereToday(me.lines(Me.day(System.currentTimeMillis())), c.name)
+            Me.brief(me.profile, me.summaries(3), max = if (drafts) 500 else 900),
+            Me.elsewhereToday(me.lines(Me.day(System.currentTimeMillis())), c.name, max = if (drafts) 4 else 8)
                 ?.let { L.t("我今天在别的聊天里说过：\n", "What I said in other chats today:\n") + it },
         ).joinToString("\n").ifBlank { null }
         var prompt = OpenRouter.deepPrompt(
             c.name, c.note, c.style, c.history, c.relation,
-            lines, c.answers, c.viaOcr, hasImage, c.situation, c.relationship, c.closeness, c.profile, about,
+            lines, c.answers, c.viaOcr, hasImage, c.situation, c.relationship, c.closeness,
+            if (drafts) Profile.forDrafts(c.profile) else c.profile, about, c.theirStyle,
         )
         // Drafts in my voice: how I actually answered this person before, from the kept history.
-        if (kind == REPLY) {
+        if (drafts) {
             val history = people.archiveAll(v.personId)
             if (history.isNotEmpty()) {
                 val said = c.transcript.takeLast(4).filter { it.first == "对方" }.takeLast(2).joinToString(" ") { it.second }
                 prompt += OpenRouter.voice(
-                    Archive.examples(history, said, k = 8, exclude = lines.map { it.second }.toSet()),
+                    Archive.examples(history, said, k = 5, exclude = lines.map { it.second }.toSet()),
                     Archive.phrases(history, "我"),
                 )
             }
@@ -1552,6 +1617,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         val all: List<Pair<String, String>>,
         val counts: Relation.Stats,
         val style: Person.Style,
+        val theirStyle: Person.Style = Person.Style(),
     )
 
     /**
@@ -1573,8 +1639,9 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         val all = people.archiveAll(id)
         val counts = Relation.Stats().also { Relation.observeBulk(it, all) }
         val style = Person.Style()
-        all.filter { it.first == "我" }.forEach { Person.observe(style, it.second) }
-        return Kept(history.size, history, all, counts, style)
+        val theirs = Person.Style()
+        for ((who, text) in all) Person.observe(if (who == "我") style else theirs, text)
+        return Kept(history.size, history, all, counts, style, theirs)
     }
 
     /** On the main thread, once [keep] is done: the record takes in what was kept, then the profile is written. */
@@ -1594,6 +1661,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             stats.theirMsgs = k.counts.theirMsgs; stats.myMsgs = k.counts.myMsgs
             stats.theirChars = k.counts.theirChars; stats.myChars = k.counts.myChars
             rec.style = k.style
+            rec.theirStyle = k.theirStyle
         }
         // The read began at the newest screen: live counting carries on from there, not from the
         // top of the history the read ended on.
@@ -1978,6 +2046,11 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
      * a picture the vision model will read) instead of leaving it painted over the chat.
      */
     private fun captureChat(hideOverlay: Boolean, onDone: (Shot?, String) -> Unit) {
+        // Android takes one screenshot a second for a service and refuses the next: a screen read
+        // right after a deep read's picture failed, and the card went with it. Waited for instead,
+        // before the card is hidden, so hiding it does not last longer.
+        val wait = lastShotAt + SHOT_GAP_MS - SystemClock.uptimeMillis()
+        if (wait > 0) { main.postDelayed({ captureChat(hideOverlay, onDone) }, wait); return }
         if (Build.VERSION.SDK_INT >= 34) {
             val w = chatWindow(targetPkg)?.first
             if (w != null) { captureWindow(w, hideOverlay, onDone); return }
@@ -1988,6 +2061,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     @TargetApi(34)
     private fun captureWindow(w: AccessibilityWindowInfo, hideOverlay: Boolean, onDone: (Shot?, String) -> Unit) {
         val r = Rect().also { w.getBoundsInScreen(it) }
+        lastShotAt = SystemClock.uptimeMillis()
         takeScreenshotOfWindow(w.id, shotIo, object : TakeScreenshotCallback {
             override fun onSuccess(result: ScreenshotResult) {
                 val bmp = toBitmap(result)
@@ -1997,7 +2071,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
 
             override fun onFailure(errorCode: Int) {
                 Diag.log("window capture failed (${shotError(errorCode)}), using the display")
-                val wait = if (errorCode == ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT) 350L else 0L
+                val wait = if (errorCode == ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT) SHOT_GAP_MS else 0L
                 main.postDelayed({ captureDisplay(hideOverlay, onDone) }, wait)
             }
         })
@@ -2038,6 +2112,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
      */
     private fun captureBitmap(onDone: (Bitmap?, String) -> Unit, tries: Int) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) { onDone(null, "needs Android 11+"); return }
+        lastShotAt = SystemClock.uptimeMillis()
         // The callback must not land on the main thread: a debug route blocks waiting for it.
         takeScreenshot(Display.DEFAULT_DISPLAY, shotIo, object : TakeScreenshotCallback {
             override fun onSuccess(result: ScreenshotResult) {
@@ -2047,7 +2122,8 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
 
             override fun onFailure(errorCode: Int) {
                 if (errorCode in RETRYABLE_SHOT && tries > 1) {
-                    main.postDelayed({ captureBitmap(onDone, tries - 1) }, 350)
+                    // Too soon means a second: three tries 350 ms apart never got past it.
+                    main.postDelayed({ captureBitmap(onDone, tries - 1) }, if (errorCode == ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT) SHOT_GAP_MS else 350)
                 } else {
                     onDone(null, "failed: ${shotError(errorCode)}")
                 }
@@ -2067,13 +2143,42 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
      * person instead of minting another; with no such memory it stays "unknown" for now.
      */
     private fun unreadableName(): String? {
-        val avatar = lastAvatarHash.takeIf { it.isNotBlank() }?.let { people.resolveFingerprint(targetPkg, it) }
+        val pkg = targetPkg
+        val inside = lastAvatarInside.takeIf { it.isNotBlank() }
+        val older = lastAvatarHash.takeIf { it.isNotBlank() }
         val title = lastTitleHash.takeIf { it.isNotBlank() }
-        if (avatar != null) {
-            title?.let { people.rememberTitle(targetPkg, it, avatar) }
-            return avatar
+        // The inside of the avatar first: it is the same in light and dark mode. Then the older
+        // fingerprint, which names everyone seen before this one existed.
+        val byInside = inside?.let { people.printOwner(pkg, it) }
+        val byOlder = older?.let { people.existingFingerprint(pkg, it) }
+        val who = when {
+            byInside != null && byOlder != null && byInside.first != byOlder -> onePerson(pkg, byInside.first, byOlder, byInside.second)
+            else -> byInside?.first ?: byOlder ?: inside ?: older
         }
-        return title?.let { people.titleOwner(targetPkg, it) }
+        if (who != null) {
+            inside?.let { people.rememberPrint(pkg, it, who) }
+            title?.let { people.rememberTitle(pkg, it, who) }
+            return who
+        }
+        // Only my messages on screen, no avatar: the title bar, as seen with them before.
+        return title?.let { people.titleOwner(pkg, it) }
+    }
+
+    /**
+     * Two records for one chat: its avatar's inside belongs to one, its older fingerprint to the
+     * other. That is one person seen in light and in dark mode, whose background the older
+     * fingerprint took in. The one with more known goes on; the other, if it is only a few
+     * turns seen and nothing learned, is merged into it. Two with a history read each are left
+     * as they are, the next chat simply going to the better one.
+     */
+    private fun onePerson(pkg: String, a: String, b: String, dist: Int): String {
+        val keep = Person.better(people.known(pkg, a), people.known(pkg, b))
+        val other = people.known(pkg, if (keep.name == a) b else a)
+        if (other.learned == 0 && dist <= 1) {
+            people.link("$pkg|${other.name}", "$pkg|${keep.name}")
+            Diag.log("merged ${other.name} into ${keep.name}: one chat in light and dark mode")
+        }
+        return keep.name
     }
 
     /**
@@ -2106,10 +2211,15 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
      * Their avatar, from the row of the first message they sent that nothing is drawn over (a
      * notification, our card, the keyboard): a photo, so it has real variation.
      */
-    private fun avatarPrint(bmp: Bitmap, win: Chat.Box, bubbles: List<Chat.Bubble>, over: List<Chat.Box>): IntArray? {
+    private fun avatarPrint(bmp: Bitmap, win: Chat.Box, bubbles: List<Chat.Bubble>, over: List<Chat.Box>, inside: Boolean = false): IntArray? {
         val w = bmp.width
+        val dp = resources.displayMetrics.density
         val region = bubbles.filter { it.incoming }.map { b ->
-            Chat.Box(win.left + (w * 0.015f).toInt(), b.box.top, win.left + (w * 0.09f).toInt(), (b.box.top + bmp.height * 0.032f).toInt())
+            // [inside]: a square in the middle of the avatar, well inside its edges and rounded
+            // corners (WeChat draws it about 40dp across, some 12dp from the edge, its top level
+            // with the bubble's). The older strip began at the screen's edge, in the background.
+            if (inside) Chat.Box(win.left + (16 * dp).toInt(), b.box.top + (2 * dp).toInt(), win.left + (40 * dp).toInt(), b.box.top + (26 * dp).toInt())
+            else Chat.Box(win.left + (w * 0.015f).toInt(), b.box.top, win.left + (w * 0.09f).toInt(), (b.box.top + bmp.height * 0.032f).toInt())
         }.firstOrNull { r -> over.none { Chat.overlaps(it, r) } } ?: return null
         // Screen to bitmap coordinates.
         return blockMeans(bmp, Chat.Box(region.left - win.left, region.top - win.top, region.right - win.left, region.bottom - win.top))
@@ -2127,6 +2237,40 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             Chat.Box(r.left, r.top, r.right, r.bottom)
         }.filter { it.bottom - it.top < screen * 0.9f }
     }.getOrDefault(emptyList())
+
+    /** People already compared with the others in their app this run; see [mergeLookalike]. */
+    private val lookalikeChecked = HashSet<String>()
+
+    /**
+     * Someone known by a fingerprint whose name looks the same, by its colours, as another's in
+     * the same app: one person, split in two by a change between light and dark mode before the
+     * fingerprint left the background out. The one with nothing learned is merged into the other
+     * (two with a history read each are not merged on a picture alone). Once per person a run.
+     * True when [record] itself was merged away and the screen is to be read again.
+     */
+    private fun mergeLookalike(record: PersonStore.Record, pic: Bitmap): Boolean {
+        if (!lookalikeChecked.add(record.id)) return false
+        val pkg = record.id.substringBefore('|')
+        val mine = colourSignature(pic) ?: return false
+        val other = people.fingerprintPeople(pkg).filter { it != record.id }.firstOrNull { id ->
+            people.namePicture(id)?.let { colourSignature(it) }?.let { Person.sameColours(mine, it) } == true
+        } ?: return false
+        val a = people.known(pkg, record.name)
+        val b = people.known(pkg, other.substringAfter('|'))
+        val keep = Person.better(a, b)
+        val gone = if (keep.name == a.name) b else a
+        if (gone.learned > 0) return false
+        people.link("$pkg|${gone.name}", "$pkg|${keep.name}")
+        Diag.log("merged ${gone.name} into ${keep.name}: the same name in light and dark mode")
+        if (cardFor == "$pkg|${gone.name}") cardFor = null
+        return gone.name == record.name
+    }
+
+    private fun colourSignature(bmp: Bitmap): IntArray? {
+        val px = IntArray(bmp.width * bmp.height)
+        bmp.getPixels(px, 0, bmp.width, 0, 0, bmp.width, bmp.height)
+        return Person.colourSignature(px, bmp.width, bmp.height)
+    }
 
     /** Name pictures seen lately that differ from the kept one, per person. */
     private val pictureVotes = HashMap<String, Person.PictureVotes>()
@@ -2346,6 +2490,10 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         private const val MAX_NODES = 3000
         /** The longest a walk of the watched app's view tree may hold the main thread. */
         private const val WALK_BUDGET_MS = 2_000L
+        /** Android's least time between two screenshots by one service, and a little more. */
+        private const val SHOT_GAP_MS = 1_050L
+        /** Empty reads in a row that are read again before the card is put away. */
+        private const val EMPTY_RETRIES = 3
         /** A safety net, not a limit anyone should meet: the read ends at the first message. */
         private const val MAX_LEARN_PAGES = 5000
         /** Pages in a row with nothing new that mean the top of the history (or a long run of pictures). */
@@ -2357,6 +2505,8 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         private const val REDUCE_CHARS = 40_000
         /** Lines of conversation a deep read or reply drafts see, from the kept history when the screen holds fewer. */
         private const val CONTEXT_LINES = 30
+        /** Context for reply drafts, asked for far more often than a deep read. */
+        private const val REPLY_LINES = 20
         /** A profile write that lost its connection starts again by itself this many times. */
         private const val PROFILE_RESUMES = 3
         /** How long after a lost connection a profile write is picked up again. */

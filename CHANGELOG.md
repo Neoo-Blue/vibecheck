@@ -4,6 +4,53 @@ APKs for every version are on the [releases page](https://github.com/Neoo-Blue/v
 Each section below is also that release's notes: the Release workflow publishes the section whose
 heading matches the tag.
 
+## 6.8.7
+
+- **The card stays up when you ask for drafts.** Android lets an app take one screenshot a second
+  and refuses the next. A screen read that came right after another screenshot (drafts took one,
+  and so did the automatic deep read) came back empty, and the card was put away until something
+  on the screen moved: it seemed to vanish until you scrolled. Screenshots now wait their turn,
+  and a read that sees nothing is tried again while the card stays where it is.
+- **Drafts no longer take a screenshot.** The chat's text is enough to write a reply; the picture
+  cost more than the rest of the question and hid the card while it was taken. A deep read you ask
+  for still sends one.
+- **No deep read unless you tap Think.** It used to run by itself on turns that mattered, a paid
+  call each time. The card shows Jev's read and the drafts; Think is there when you want more.
+  Automatic deep reads can be switched back on under Setup → Behaviour.
+- **Deep reads are faster.** They no longer think before answering: three short lines did not need
+  a minute of thinking, which also cost several times the answer.
+- **Fewer tokens per draft.** Drafts get the parts of the profile that shape a reply (how you get
+  along, how each of you talks, your jokes, sore spots, likes) instead of all of it, 20 lines of
+  context instead of 30, five past exchanges instead of eight, and a shorter note about you.
+- **Light and dark mode no longer split a person in two.** Someone whose name is an emoji is
+  known by their avatar, and the part of the screen fingerprinted for it reached past the avatar
+  into the chat's background, which dark mode changes: in the other mode they became someone new,
+  with nothing learned. The fingerprint is now taken from inside the avatar only. A person already
+  split this way is put back together: the record with nothing learned is merged into the other
+  when their names' pictures match by colour (the same in both modes), or the next time the chat
+  is seen in both.
+- **Jev learns each person as you chat.**
+  - How they write (short or long messages, laughing and joking, emoji, questions) is kept from
+    their messages as they come.
+  - What a turn with them usually is (what they are mostly doing, how tense it usually gets) is kept
+    from every turn judged.
+  - Both go to Jev with each new message. A short 「嗯」 from someone who always writes short is not
+    read as cold, and the reading fits them better the longer you talk.
+  - People learned before start from their kept history. Their page in the app shows both.
+
+中文：
+- **点「回复」时卡片不再消失**：Android 规定一个应用一秒只能截一次屏，紧接着的第二次会被拒绝。回复和自动深思都要截图，紧跟在后面的那次读屏就读不到东西，卡片随即被收起，直到屏幕上有东西动了才回来，看起来就像消失了。现在截图会排队等，读不到东西就过一会儿再读，卡片留在原处。
+- **回复不再截图**：写回复看聊天文字就够了，截图比问题的其余部分加起来还费 token，截图时卡片还得藏起来。你点「深思」时仍然会带上截图。
+- **不点「深思」就不深思**：以前遇到值得细看的消息会自动深思，每次都要花钱调用模型。现在卡片只显示 Jev 的判断和回复建议，想看更多再点「深思」。需要的话可以在「设置 → 行为」里重新打开自动深思。
+- **深思更快**：不再先思考再回答。三行短短的分析用不着想一分钟，那段思考花的钱也比回答本身多好几倍。
+- **每次回复更省 token**：只带档案里跟回复有关的部分（怎么相处、双方怎么说话、梗、雷区、喜好），不再整份档案都带；上下文从 30 行减到 20 行，以前的真实回复从 8 段减到 5 段，「关于我」也更短。
+- **浅色、深色模式不再把一个人拆成两个**：名字是表情的人是靠头像认的，以前截取的那块区域越过头像，带进了聊天背景，而深色模式正好改变背景颜色，换个模式就被当成了新的人，学过的东西全都用不上。现在只取头像里面的部分。已经被拆开的人会自动合回去：名字图片的颜色对得上（在两种模式下都一样）时，把什么都没学过的那份并进另一份；或者在两种模式下都见过这个聊天之后合并。
+- **Jev 边聊边学每个人**：
+  - Ta 怎么说话（话长话短、爱不爱笑和开玩笑、用不用表情、爱不爱问）从 Ta 发来的每条消息里记下；
+  - 和 Ta 聊天平时是什么状态（多半在干什么、通常紧不紧张）从每一轮判断里记下；
+  - 两样都会随每条新消息告诉 Jev。一向话少的人回一句「嗯」不会被当成冷淡，聊得越久，判断越贴近 Ta；
+  - 以前学过的人会先从存下的聊天记录里补上。应用里这个人的页面上能看到这两项。
+
 ## 6.8.6
 
 - **Replies no longer hang.** A model stuck in a provider's queue kept the panel on "Thinking…"

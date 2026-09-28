@@ -10,7 +10,17 @@ import java.util.Locale
 class Prefs(ctx: Context) {
     private val sp = ctx.getSharedPreferences("jev", Context.MODE_PRIVATE)
 
-    init { forgetStoredDefaults() }
+    init { forgetStoredDefaults(); autoDeepOffOnce() }
+
+    /**
+     * The automatic deep read was on by default and ran a paid call on every turn that mattered,
+     * unasked; the card with Jev's read and the drafts is what is wanted. Off from 6.8.7, once
+     * for everyone; it can be switched back on in Setup.
+     */
+    private fun autoDeepOffOnce() {
+        if (sp.getInt("autodeepv", 0) >= 2) return
+        sp.edit().putBoolean("autodeep", false).putInt("autodeepv", 2).apply()
+    }
 
     /**
      * Settings pages before 6.7.4 stored the default model as if it had been chosen, so a newer
@@ -106,11 +116,11 @@ class Prefs(ctx: Context) {
         set(v) = sp.edit().putBoolean("adult", v).apply()
 
     /**
-     * Run the deep model automatically on turns Jev flags as non-routine. Costs roughly a tenth
-     * of a cent each, only on the turns that matter, and is where the actual insight comes from.
+     * Run the deep model automatically on turns Jev flags as non-routine, without Think being
+     * tapped. Off by default: each is a paid call nobody asked for.
      */
     var autoDeep: Boolean
-        get() = sp.getBoolean("autodeep", true)
+        get() = sp.getBoolean("autodeep", false)
         set(v) = sp.edit().putBoolean("autodeep", v).apply()
 
     /** Read the screen with on-device OCR when the app hides its accessibility tree (WeChat does). */
