@@ -121,11 +121,16 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     private var lastCounts = ""
     private var lastTitles = listOf<Pair<String, Chat.Box>>()
     private var lastDescs = listOf<String>()
-    /** Fingerprints from the last OCR pass: their avatar (when one of their messages shows) and the title bar. */
+    /**
+     * Fingerprints of their avatar from the last OCR pass, when one of their messages shows: a
+     * strip from the screen's edge (the oldest kind), and the inside of the avatar, the same in
+     * light and in dark mode, in 15 bits ([Person.insideHash]) and by its colours ([Person.avatarHash]).
+     */
     private var lastAvatarHash = ""
-    /** The inside of their avatar ([Person.insideHash]): the same in light and in dark mode. */
     private var lastAvatarInside = ""
-    private var lastTitleHash = ""
+    private var lastAvatar = ""
+    /** The chat on screen was found by their avatar, not by the picture of its name. */
+    private var byAvatar = false
     /** The name the last conversation was read under, for the moments a typing indicator hides it. */
     private var lastPeerName: String? = null
     /** The title bar's name cut out as a picture, from the last OCR pass that could not read it. */
@@ -432,7 +437,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         // after whichever chat was captured last.
         lastAvatarHash = ""
         lastAvatarInside = ""
-        lastTitleHash = ""
+        lastAvatar = ""
         lastNamePicture = null
         handle(bubbles)
     }
@@ -530,18 +535,18 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                     resources.displayMetrics.density, pixelSide(shot.bmp, win, over + exclude),
                 )
                 val covered = Person.titleCovered(over + exclude, win)
-                val avatar = avatarPrint(shot.bmp, win, found, over + exclude)?.let { Person.hashOf(it) }.orEmpty()
+                val older = avatarPrint(shot.bmp, win, found, over + exclude)?.let { Person.hashOf(it) }.orEmpty()
                 val inside = avatarPrint(shot.bmp, win, found, over + exclude, inside = true)?.let { Person.insideHash(it) }.orEmpty()
-                val title = if (covered) "" else Person.hashOf(titlePrint(shot.bmp))
+                val avatar = avatarPrint(shot.bmp, win, found, over + exclude, inside = true, colour = true)?.let { Person.avatarHash(it) }.orEmpty()
                 // No name to read in the title bar: keep a picture of it (the emoji the name is made of).
                 val picture = if (!covered && titles.none { Person.looksLikeName(it.first) } && !Person.isTyping(titles)) namePicture(shot.bmp) else null
                 shot.bmp.recycle()
                 if (gen != screenGen) { rescanSoon(); return@read }   // the screen changed under the capture
                 onHomeScreen = Chat.looksLikeHomeScreen(placed, win)
                 hasInput = false
-                lastAvatarHash = avatar
+                lastAvatarHash = older
                 lastAvatarInside = inside
-                lastTitleHash = title
+                lastAvatar = avatar
                 lastNamePicture = picture
                 lastWindow = win
                 lastTitles = titles
@@ -654,8 +659,9 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         // together under one "unknown" record.
         // A name hidden by typing is not an unreadable one: no fingerprint for it, or a contact
         // with a perfectly good name would be filed under a stray fingerprint record.
+        byAvatar = false
         val name = Person.peerName(lastTitles, lastDescs, lastWindow, symbols = !viaOcr)
-            ?: (if (Person.isTyping(lastTitles)) lastPeerName?.takeIf { activeId != null } else unreadableName())
+            ?: (if (Person.isTyping(lastTitles)) lastPeerName?.takeIf { activeId != null } else unreadableName(read))
             ?: UNKNOWN
         lastPeerName = name
         // A quote is someone's earlier words, not a new message: theirs under my reply (by their
@@ -664,11 +670,11 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         if (bubbles.isEmpty()) { inconclusive("only quotes"); return }
         val record = people.load(targetPkg, name)
         val id = record.id
-        // One person split in two by a change between light and dark mode: put back together
-        // before anything is counted into the wrong half, and the screen read again.
-        if (Person.isFingerprint(record.name) && lastNamePicture?.let { mergeLookalike(record, it) } == true) { rescanSoon(); return }
-        // Someone known only by a fingerprint: the picture of their name is how they are shown.
-        if (Person.isFingerprint(record.name) && record.alias.isBlank()) lastNamePicture?.let { considerNamePicture(id, it) }
+        // Someone known only by a fingerprint: the picture of their name is how they are shown,
+        // and how their chat is found when none of their messages is on screen. Kept only from a
+        // look that found them by their avatar: a look that found them by the picture has
+        // nothing new to say about it.
+        if (Person.isFingerprint(record.name) && byAvatar) lastNamePicture?.let { considerNamePicture(id, it) }
         nameFromNotifications(record, bubbles)
         val entering = activeId != id
         activeId = id
@@ -2161,53 +2167,82 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     }
 
     /**
-     * A coarse grayscale fingerprint used as an identity when the contact's name cannot be read:
-     * an emoji-only name like "🌙" is invisible to OCR, but its pixels are stable across visits,
-     * so the chat still gets its own memory. [win] is where the bitmap sits on screen.
-     */
-    /**
      * A chat whose name cannot be read (OCR cannot see emoji) is known by the avatar beside their
-     * messages. The title bar, which shows the emoji name, is fingerprinted too and remembered
-     * against that avatar, so a screen with only my own messages on it still finds the same
-     * person instead of minting another; with no such memory it stays "unknown" for now.
+     * messages: by the colours of its inside once seen that way, else by the weaker fingerprints it
+     * was known by before, which the colours are then remembered against. With none of their
+     * messages on screen there is no avatar: see [withoutAvatar].
      */
-    private fun unreadableName(): String? {
+    private fun unreadableName(read: List<Chat.Bubble>): String? {
         val pkg = targetPkg
+        val avatar = lastAvatar.takeIf { it.isNotBlank() }
         val inside = lastAvatarInside.takeIf { it.isNotBlank() }
         val older = lastAvatarHash.takeIf { it.isNotBlank() }
-        val title = lastTitleHash.takeIf { it.isNotBlank() }
-        // The inside of the avatar first: it is the same in light and dark mode. Then the older
-        // fingerprint, which names everyone seen before this one existed.
-        val byInside = inside?.let { people.printOwner(pkg, it) }
-        val byOlder = older?.let { people.existingFingerprint(pkg, it) }
-        val who = when {
-            byInside != null && byOlder != null && byInside.first != byOlder -> onePerson(pkg, byInside.first, byOlder, byInside.second)
-            else -> byInside?.first ?: byOlder ?: inside ?: older
-        }
-        if (who != null) {
-            inside?.let { people.rememberPrint(pkg, it, who) }
-            title?.let { people.rememberTitle(pkg, it, who) }
-            return who
-        }
-        // Only my messages on screen, no avatar: the title bar, as seen with them before.
-        return title?.let { people.titleOwner(pkg, it) }
+        if (avatar == null && inside == null && older == null) return withoutAvatar(pkg, read)
+        val who = avatar?.let { people.printOwner(pkg, it, Person.AVATAR_SAME)?.first } ?: run {
+            // Not seen since the fingerprint was of colours: the inside of the avatar in 15 bits,
+            // then the oldest kind, which names everyone seen before either existed. Someone
+            // already seen with the colour one is found this way only when what is on screen
+            // carries on from their chat: otherwise a weak match with them is somebody else, new.
+            val page = Chat.withoutEchoes(read).map { (if (it.incoming) "对方" else "我") to it.text }
+            val unmoved = { name: String ->
+                avatar == null || !people.hasAvatarPrint(pkg, name) || Archive.reached(people.load(pkg, name).tail, page)
+            }
+            val byInside = inside?.let { people.printOwner(pkg, it)?.first }?.takeIf(unmoved)
+            val byOlder = older?.let { people.existingFingerprint(pkg, it) }?.takeIf(unmoved)
+            if (byInside != null && byOlder != null && byInside != byOlder) onePerson(pkg, byInside, byOlder)
+            else byInside ?: byOlder ?: avatar ?: inside ?: older
+        } ?: return null
+        avatar?.let { people.rememberPrint(pkg, it, who) }
+        inside?.let { people.rememberPrint(pkg, it, who) }
+        byAvatar = true
+        return who
     }
 
     /**
-     * Two records for one chat: its avatar's inside belongs to one, its older fingerprint to the
-     * other. That is one person seen in light and in dark mode, whose background the older
-     * fingerprint took in. The one with more known goes on; the other, if it is only a few
-     * turns seen and nothing learned, is merged into it. Two with a history read each are left
-     * as they are, the next chat simply going to the better one.
+     * None of their messages on screen, so no avatar: the picture of the name in the title bar,
+     * when it is one person's alone. Else the chat this was a moment ago, if what is on screen
+     * carries on from what was last counted in it and its kept picture does not say otherwise;
+     * that is how scrolling through my own messages stays in their chat while their picture is
+     * still being taken.
      */
-    private fun onePerson(pkg: String, a: String, b: String, dist: Int): String {
-        val keep = Person.better(people.known(pkg, a), people.known(pkg, b))
-        val other = people.known(pkg, if (keep.name == a) b else a)
-        if (other.learned == 0 && dist <= 1) {
-            people.link("$pkg|${other.name}", "$pkg|${keep.name}")
-            Diag.log("merged ${other.name} into ${keep.name}: one chat in light and dark mode")
-        }
-        return keep.name
+    private fun withoutAvatar(pkg: String, read: List<Chat.Bubble>): String? {
+        val pic = lastNamePicture
+        pic?.let { pictureOwner(pkg, it) }?.let { return it }
+        val current = activeId?.takeIf { it.startsWith("$pkg|#") } ?: return null
+        val seen = pic?.let { emojiPrint(it) }
+        val kept = people.namePrint(current)
+        if (seen != null && kept != null && !Person.sameEmoji(seen, kept)) return null
+        val page = Chat.withoutEchoes(read).map { (if (it.incoming) "对方" else "我") to it.text }
+        return current.substringAfter('|').takeIf { Archive.reached(people.loadId(current).tail, page) }
+    }
+
+    /**
+     * Two records for one chat: the inside of its avatar belongs to one, its oldest fingerprint
+     * to the other. One person seen in light and in dark mode before fingerprints left the
+     * background out, or two people whose 15-bit fingerprints happen to be alike. The chat goes
+     * to the one whose kept picture is the name in the title bar, else to the one with more
+     * known. Nothing is merged: two people taken for one had their memories mixed for good.
+     */
+    private fun onePerson(pkg: String, a: String, b: String): String =
+        lastNamePicture?.let { pictureOwner(pkg, it, among = listOf(a, b)) }
+            ?: Person.better(people.known(pkg, a), people.known(pkg, b)).name
+
+    /**
+     * Whose name the picture from the title bar is, among the people known by a fingerprint in
+     * [pkg] (or [among] them): the one whose kept picture it matches, alone (Person.pictureOwner).
+     */
+    private fun pictureOwner(pkg: String, pic: Bitmap, among: List<String>? = null): String? {
+        val seen = emojiPrint(pic) ?: return null
+        val names = among ?: people.fingerprintPeople(pkg).map { it.substringAfter('|') }
+        val kept = names.mapNotNull { name -> people.namePrint("$pkg|$name")?.let { people.known(pkg, name).name to it } }
+        val current = activeId?.takeIf { it.startsWith("$pkg|") }?.substringAfter('|')
+        return Person.pictureOwner(seen, kept, current)
+    }
+
+    private fun emojiPrint(bmp: Bitmap): IntArray? {
+        val px = IntArray(bmp.width * bmp.height)
+        bmp.getPixels(px, 0, bmp.width, 0, 0, bmp.width, bmp.height)
+        return Person.emojiPrint(px, bmp.width, bmp.height)
     }
 
     /**
@@ -2238,9 +2273,10 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
 
     /**
      * Their avatar, from the row of the first message they sent that nothing is drawn over (a
-     * notification, our card, the keyboard): a photo, so it has real variation.
+     * notification, our card, the keyboard): a photo, so it has real variation. Block means on a
+     * 4 x 4 grid, in grey, or [colour] (Person.avatarHash).
      */
-    private fun avatarPrint(bmp: Bitmap, win: Chat.Box, bubbles: List<Chat.Bubble>, over: List<Chat.Box>, inside: Boolean = false): IntArray? {
+    private fun avatarPrint(bmp: Bitmap, win: Chat.Box, bubbles: List<Chat.Bubble>, over: List<Chat.Box>, inside: Boolean = false, colour: Boolean = false): IntArray? {
         val w = bmp.width
         val dp = resources.displayMetrics.density
         val region = bubbles.filter { it.incoming }.map { b ->
@@ -2251,7 +2287,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             else Chat.Box(win.left + (w * 0.015f).toInt(), b.box.top, win.left + (w * 0.09f).toInt(), (b.box.top + bmp.height * 0.032f).toInt())
         }.firstOrNull { r -> over.none { Chat.overlaps(it, r) } } ?: return null
         // Screen to bitmap coordinates.
-        return blockMeans(bmp, Chat.Box(region.left - win.left, region.top - win.top, region.right - win.left, region.bottom - win.top))
+        return blockMeans(bmp, Chat.Box(region.left - win.left, region.top - win.top, region.right - win.left, region.bottom - win.top), colour)
     }
 
     /**
@@ -2267,47 +2303,21 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         }.filter { it.bottom - it.top < screen * 0.9f }
     }.getOrDefault(emptyList())
 
-    /** People already compared with the others in their app this run; see [mergeLookalike]. */
-    private val lookalikeChecked = HashSet<String>()
-
-    /**
-     * Someone known by a fingerprint whose name looks the same, by its colours, as another's in
-     * the same app: one person, split in two by a change between light and dark mode before the
-     * fingerprint left the background out. The one with nothing learned is merged into the other
-     * (two with a history read each are not merged on a picture alone). Once per person a run.
-     * True when [record] itself was merged away and the screen is to be read again.
-     */
-    private fun mergeLookalike(record: PersonStore.Record, pic: Bitmap): Boolean {
-        if (!lookalikeChecked.add(record.id)) return false
-        val pkg = record.id.substringBefore('|')
-        val mine = colourSignature(pic) ?: return false
-        val other = people.fingerprintPeople(pkg).filter { it != record.id }.firstOrNull { id ->
-            people.namePicture(id)?.let { colourSignature(it) }?.let { Person.sameColours(mine, it) } == true
-        } ?: return false
-        val a = people.known(pkg, record.name)
-        val b = people.known(pkg, other.substringAfter('|'))
-        val keep = Person.better(a, b)
-        val gone = if (keep.name == a.name) b else a
-        if (gone.learned > 0) return false
-        people.link("$pkg|${gone.name}", "$pkg|${keep.name}")
-        Diag.log("merged ${gone.name} into ${keep.name}: the same name in light and dark mode")
-        if (cardFor == "$pkg|${gone.name}") cardFor = null
-        return gone.name == record.name
-    }
-
-    private fun colourSignature(bmp: Bitmap): IntArray? {
-        val px = IntArray(bmp.width * bmp.height)
-        bmp.getPixels(px, 0, bmp.width, 0, 0, bmp.width, bmp.height)
-        return Person.colourSignature(px, bmp.width, bmp.height)
-    }
-
     /** Name pictures seen lately that differ from the kept one, per person. */
     private val pictureVotes = HashMap<String, Person.PictureVotes>()
 
-    /** A picture of an unreadable name is kept, or replaces the kept one, only once seen alike more than once. */
+    /**
+     * A picture of an unreadable name is kept, or replaces the kept one, only once seen alike more
+     * than once. Kept for someone named from a notification too: it is how their chat is found
+     * when none of their messages is on screen.
+     */
     private fun considerNamePicture(id: String, pic: Bitmap) {
+        // The same emoji in the other mode (a light bar or a dark one around it) is no reason to
+        // take it again.
+        val keptPrint = people.namePrint(id)
+        if (keptPrint != null && emojiPrint(pic)?.let { Person.sameEmoji(it, keptPrint) } == true) { pictureVotes.remove(id); return }
         val seen = pictureSignature(pic)
-        val kept = people.namePicture(id)?.let { pictureSignature(it) }
+        val kept = people.pictureOf(id)?.let { pictureSignature(it) }
         if (!Person.keepPicture(kept, seen, pictureVotes.getOrPut(id) { Person.PictureVotes() })) return
         people.saveNamePicture(id, pic)
         Diag.log(if (kept == null) "name picture kept" else "name picture replaced")
@@ -2320,11 +2330,11 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         return Person.signature(px, bmp.width, bmp.height)
     }
 
-    /** The middle of the title bar, where the name (or the emoji that is the name) is drawn. */
-    private fun titlePrint(bmp: Bitmap): IntArray =
-        blockMeans(bmp, Chat.Box((bmp.width * 0.3f).toInt(), (bmp.height * 0.035f).toInt(), (bmp.width * 0.7f).toInt(), (bmp.height * 0.075f).toInt()))
-
-    private fun blockMeans(bmp: Bitmap, region: Chat.Box): IntArray {
+    /**
+     * 16 block means of [region] on a 4 x 4 grid, in grey; or [colour], the 16 reds, then the
+     * greens, then the blues (Person.avatarHash).
+     */
+    private fun blockMeans(bmp: Bitmap, region: Chat.Box, colour: Boolean = false): IntArray {
         val w = bmp.width
         val h = bmp.height
 
@@ -2332,12 +2342,12 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         // wobble and scroll offset, which is why the same avatar hashed differently on every scan
         // and the phone accumulated hundreds of "people". A block average barely moves.
         val cols = 4; val rows = 4
-        val out = IntArray(cols * rows)
+        val out = IntArray(cols * rows * (if (colour) 3 else 1))
         val cw = ((region.right - region.left) / cols).coerceAtLeast(1)
         val ch = ((region.bottom - region.top) / rows).coerceAtLeast(1)
         var i = 0
         for (row in 0 until rows) for (col in 0 until cols) {
-            var sum = 0L; var n = 0
+            var grey = 0L; var r = 0L; var g = 0L; var b = 0L; var n = 0
             val x0 = region.left + col * cw
             val y0 = region.top + row * ch
             var y = y0
@@ -2346,14 +2356,22 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                 while (x < x0 + cw) {
                     if (x in 0 until w && y in 0 until h) {
                         val p = bmp.getPixel(x, y)
-                        sum += ((p shr 16 and 0xFF) * 30 + (p shr 8 and 0xFF) * 59 + (p and 0xFF) * 11) / 100
+                        // Each pixel's grey rounded down on its own, as the fingerprints kept so far were made.
+                        grey += ((p shr 16 and 0xFF) * 30 + (p shr 8 and 0xFF) * 59 + (p and 0xFF) * 11) / 100
+                        r += p shr 16 and 0xFF
+                        g += p shr 8 and 0xFF
+                        b += p and 0xFF
                         n++
                     }
                     x += 2
                 }
                 y += 2
             }
-            out[i++] = if (n == 0) 0 else (sum / n).toInt()
+            if (n > 0) {
+                if (colour) { out[i] = (r / n).toInt(); out[16 + i] = (g / n).toInt(); out[32 + i] = (b / n).toInt() }
+                else out[i] = (grey / n).toInt()
+            }
+            i++
         }
         return out
     }

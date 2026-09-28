@@ -227,8 +227,10 @@ Switch this off under Setup → "Remember people while you chat"; a paused chat 
 The app reads the contact's name from the chat title bar (falling back to the avatar's
 content description on WeChat) and stores everything under "app package + name". Emoji in names
 are fine where the app gives text. OCR (WeChat, Telegram) cannot see emoji at all:
-- A chat whose name is only emoji is known by the avatar beside their messages, and the title
-  bar is remembered against it for screens where only your own messages show.
+- A chat whose name is only emoji is known by the avatar beside their messages, by the colours
+  inside it. On a screen where only your own messages show, the emoji in the title bar decides
+  when it is one person's; otherwise the chat stays with the one you were in if the messages on
+  screen carry on from it, and is otherwise not guessed.
 - Such a person is shown with the emoji itself: a small picture of the name cut from the chat's
   title bar, on the card and on the People tab, never an internal code.
 - Their real name, emoji and all, is picked up from their message notifications: once a
