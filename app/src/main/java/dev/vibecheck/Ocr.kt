@@ -26,7 +26,7 @@ object Ocr {
         val started = System.currentTimeMillis()
         val task = try {
             recognizer.process(InputImage.fromBitmap(bmp, 0))
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Crash.caught("ocr", e)
             onResult(emptyList())
             return

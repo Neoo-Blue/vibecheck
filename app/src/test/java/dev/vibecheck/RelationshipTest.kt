@@ -9,13 +9,16 @@ class RelationshipTest {
 
     @After fun chinese() { L.en = false }
 
-    /** The profile from the bug report: a best friend, whose card said 恋爱或亲密关系 91%. */
+    /**
+     * A profile from before the relationship line, of a close friend: love, closeness and a
+     * boyfriend come up further down, and a card once read such a friend as a couple.
+     */
     private val oldProfile = """
-        • 对方是我的好友或死党，关系亲密，彼此可以随意开玩笑、互怼。
-        • 我们常聊日常琐事、科技/AI、恋爱关系和情绪，也讨论共同好友“麻辣烫”。
-        • 对方说话爱用“笑死我了”“哈哈哈哈”，语气活泼随意，常打错别字，几乎不用表情符号。
-        • 我对对方说话直接，爱调侃，会用“真棒”“咬他”之类的简短回应，并常发送AI分析结果。
-        • 对方在乎情感陪伴和亲密关系，渴望被理解和喜欢，对独处感到焦虑，也在意男朋友的态度。
+        • 对方是我的好友，关系亲密，说话很随便，常互相开玩笑。
+        • 我们常聊工作、旅行、恋爱关系和情绪，也聊共同认识的朋友。
+        • 对方说话爱用“哈哈哈哈”，语气轻松随意，很少用表情。
+        • 我对对方说话直接，回得很短，常转发文章给对方。
+        • 对方在乎被理解和陪伴，最近常说起和男朋友的相处。
     """.trimIndent()
 
     @Test fun anOldProfileIsReadFromItsFirstLine() {
@@ -93,7 +96,7 @@ class RelationshipTest {
     }
 
     @Test fun aKnownRelationshipIsToldNotAsked() {
-        val transcript = listOf("对方" to "我男朋友又不回我", "我" to "那我陪你一起发臭发烂")
+        val transcript = listOf("对方" to "男朋友又不回我消息", "我" to "那我陪你在家躺一天")
         val state = Jev.stateJson("", transcript, relationship = "朋友")
         assertTrue(state.contains("\"我和对方的关系\":\"朋友\""))
         val told = Jev.triageBody(state, askSituation = false)

@@ -85,8 +85,12 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     // Worker threads log what a task throws and carry on, where it used to end the process.
     /** Jev judgments, one at a time. */
     private val judgeIo = Executors.newSingleThreadExecutor(Crash.threads("vibecheck-judge"))
-    /** OpenRouter: deep reads, reply drafts, profiles. Seconds each, so never queued in front of a judgment. */
-    private val deepIo = Executors.newFixedThreadPool(2, Crash.threads("vibecheck-deep"))
+    /**
+     * OpenRouter: deep reads and reply drafts, never queued in front of a judgment, nor behind each
+     * other: drafts asked for while the automatic deep read and an older draft were still waiting
+     * on a slow model used to wait for a free thread before they even started.
+     */
+    private val deepIo = Executors.newCachedThreadPool(Crash.threads("vibecheck-deep"))
     /**
      * Writing a profile: one coordinator per write, side by side (a write started again after it
      * got stuck must not queue behind the stuck one), and the notes on stretches three at a time.
@@ -1181,11 +1185,14 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             return
         }
         deepInFlight += tag
+        deepSince[tag] = System.currentTimeMillis()
+        waitingText[tag] = L.t("思考中…", "Thinking…")
         if (openCard) {
             deepWanted += tag
             v.sections[kind] = waiting
             card.setSection(kind, waiting, true)
         }
+        waitTick(kind, tag, v, title)
         prefs.countUse(if (kind == REPLY) Prefs.USE_REPLY else Prefs.USE_DEEP)
         val c = v.ctx
         val system = if (kind == REPLY) OpenRouter.replySystem(prefs.adult) else OpenRouter.deepSystem(prefs.adult)
@@ -1198,6 +1205,11 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             // A deep read thinks first, and the thinking counts against the answer's room: 2,500
             // tokens could all go on it and leave "the model stopped before answering".
             val tokens = if (kind == REPLY) 2500 else 4000
+            // A model stuck in a provider's queue, or gone quiet mid-answer, is given up on and the
+            // backup asked. Drafts do not think and are wanted in seconds; a deep read thinks first,
+            // and some providers send nothing while it does.
+            val deadline = if (kind == REPLY) OpenRouter.Deadline(quietMs = 40_000, answerMs = 75_000, totalMs = 150_000)
+            else OpenRouter.Deadline(quietMs = 90_000, answerMs = 180_000, totalMs = 300_000)
             deepIo.execute {
                 // Whatever goes wrong, building the prompt included, ends up on the card as a
                 // failure: the panel must never be left saying "Thinking…".
@@ -1205,26 +1217,34 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                 val started = System.currentTimeMillis()
                 // One model. Each finished line goes on the card while it writes the next, and a
                 // model that reads no images (one typed in, or Qwen) gets the text alone.
-                val ask = { m: String, prompt: String ->
-                    val once = { pic: String?, text: String ->
-                        OpenRouter.chat(prefs.orKey, m, system, text, pic, maxTokens = tokens, think = think,
-                            onLine = { line -> main.post { deepPartial(kind, tag, v, title, line) } })
+                val ask = { m: String, prompt: String, pic: String? ->
+                    val once = { p: String?, text: String ->
+                        OpenRouter.chat(prefs.orKey, m, system, text, p, maxTokens = tokens, timeoutMs = deadline.quietMs.toInt(), think = think,
+                            onLine = { line -> main.post { deepPartial(kind, tag, v, title, line) } }, deadline = deadline)
                     }
-                    runCatching { once(image, prompt) }.recoverCatching { e ->
-                        if (image != null && OpenRouter.noImages(e)) once(null, prompt.replace(OpenRouter.SCREENSHOT_NOTE, "")) else throw e
+                    runCatching { once(pic, prompt) }.recoverCatching { e ->
+                        if (pic != null && OpenRouter.noImages(e)) once(null, prompt.replace(OpenRouter.SCREENSHOT_NOTE, "")) else throw e
                     }.getOrThrow()
                 }
                 // The model set in Setup first; when it fails in a way another model might not
-                // (busy, down, refusing, cut off), the backup is asked the same.
+                // (busy, down, refusing, cut off, stuck), the backup is asked the same, without
+                // the screenshot: it is the quick way out, and a picture is what some models choke on.
                 var backupNote: String? = null
                 val r = built.mapCatching { prompt ->
                     try {
-                        ask(model, prompt)
+                        ask(model, prompt, image)
                     } catch (e: Exception) {
                         if (backup == null || !OpenRouter.worthAnotherModel(e)) throw e
                         Diag.log("deep: $model failed (${Judge.describe(e)}); asking $backup")
+                        main.post {
+                            if (tag in deepInFlight) {
+                                waitingText[tag] = L.t("${Models.nameOf(model)} 没成（${Judge.describe(e)}），换 ${Models.nameOf(backup)}…",
+                                    "${Models.nameOf(model)} failed (${Judge.describe(e)}); asking ${Models.nameOf(backup)}…")
+                                showWaiting(kind, tag, v, title)
+                            }
+                        }
                         val answer = try {
-                            ask(backup, prompt)
+                            ask(backup, if (image != null) prompt.replace(OpenRouter.SCREENSHOT_NOTE, "") else prompt, null)
                         } catch (e2: Exception) {
                             throw OpenRouter.Failure(0, L.t("${Models.nameOf(model)}：${Judge.describe(e)}；${Models.nameOf(backup)} 也出错：${Judge.describe(e2)}",
                                 "${Models.nameOf(model)}: ${Judge.describe(e)}; ${Models.nameOf(backup)} failed too: ${Judge.describe(e2)}"))
@@ -1288,6 +1308,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
      */
     private fun deepPartial(kind: String, tag: String, v: Verdict, title: String, text: String) {
         if (tag !in deepInFlight) return
+        waitingText.remove(tag)   // words are coming: no more "waiting N s"
         val section = sectionFrom(kind, title, text, done = false) ?: return
         v.sections[kind] = section
         if (cardShows === v && card.isOpen()) card.setSection(kind, section, openCard = false)
@@ -1309,6 +1330,8 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
 
     private fun deepDone(kind: String, tag: String, v: Verdict, title: String, r: Result<String>, note: String? = null) {
         deepInFlight -= tag
+        waitingText.remove(tag)
+        deepSince.remove(tag)
         val wanted = deepWanted.remove(tag)
         val section = r.fold(
             { text -> sectionFrom(kind, title, text, done = true)!!.withNote(note) },
@@ -1320,6 +1343,27 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         // be pinned onto the wrong card. And it only pops open while that chat is on screen; after
         // leaving it waits on that chat's card for the way back.
         if (cardShows === v) card.setSection(kind, section, openCard = wanted && activeId == v.personId && !unsettled)
+    }
+
+    /** When each deep read or draft set in flight was asked, and what its panel says while nothing is written yet. */
+    private val deepSince = HashMap<String, Long>()
+    private val waitingText = HashMap<String, String>()
+
+    /** The waiting line with the seconds gone by, so a slow model reads as slow rather than stuck. */
+    private fun showWaiting(kind: String, tag: String, v: Verdict, title: String) {
+        val text = waitingText[tag] ?: return
+        val secs = (System.currentTimeMillis() - (deepSince[tag] ?: return)) / 1000
+        val section = OverlayCard.Section(title, listOf(if (secs >= 3) text + L.t(" $secs 秒", " ${secs}s") else text))
+        v.sections[kind] = section
+        if (cardShows === v && card.isOpen()) card.setSection(kind, section, openCard = false)
+    }
+
+    private fun waitTick(kind: String, tag: String, v: Verdict, title: String) {
+        main.postDelayed({
+            if (tag !in deepInFlight) return@postDelayed
+            showWaiting(kind, tag, v, title)
+            waitTick(kind, tag, v, title)
+        }, 5_000)
     }
 
     /** Downscaled so a 1440x3120 screen is a sane number of vision tokens. */
@@ -1914,8 +1958,9 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         val copy = hw?.copy(Bitmap.Config.ARGB_8888, false)
         hw?.recycle()
         copy
-    } catch (e: Exception) {
-        Diag.log("capture unreadable: ${e.message}")
+    } catch (e: Throwable) {
+        // Out of memory for a full-screen copy included: this capture is skipped, not the service.
+        Diag.log("capture unreadable: ${e.javaClass.simpleName}: ${e.message}")
         null
     } finally {
         runCatching { result.hardwareBuffer.close() }
@@ -1948,7 +1993,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
 
     /**
      * A coarse grayscale fingerprint used as an identity when the contact's name cannot be read:
-     * an emoji-only name like "🍵" is invisible to OCR, but its pixels are stable across visits,
+     * an emoji-only name like "🌙" is invisible to OCR, but its pixels are stable across visits,
      * so the chat still gets its own memory. [win] is where the bitmap sits on screen.
      */
     /**

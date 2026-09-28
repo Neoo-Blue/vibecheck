@@ -118,7 +118,7 @@ class IdentityTest {
     private fun box(l: Int, t: Int, r: Int, b: Int) = Chat.Box(l, t, r, b)
 
     @Test fun emojiNamesAreRealNames() {
-        assertTrue("an emoji-only contact name is still a name", Person.looksLikeName("🍵"))
+        assertTrue("an emoji-only contact name is still a name", Person.looksLikeName("🌙"))
         assertTrue(Person.looksLikeName("Dory Arden🐟"))
         assertTrue(Person.looksLikeName("MAOTT🎵"))
         // but status-bar noise still must not qualify

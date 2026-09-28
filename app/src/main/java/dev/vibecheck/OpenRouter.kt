@@ -35,7 +35,8 @@ object OpenRouter {
      *
      * The answer is streamed: [onLine] gets everything written so far each time a line is done,
      * so the card can show the first draft while the model is still writing the rest. A model
-     * that cannot switch thinking off is asked again with a little thinking.
+     * that cannot switch thinking off is asked again with a little thinking, and room for it:
+     * the thinking counts against [maxTokens], and could use up all of a draft's.
      */
     fun chat(
         apiKey: String,
@@ -48,12 +49,23 @@ object OpenRouter {
         temperature: Double = 0.7,
         think: Think = Think.LOW,
         onLine: ((String) -> Unit)? = null,
+        deadline: Deadline? = null,
     ): String = try {
-        send(apiKey, model, system, user, imageJpegBase64, maxTokens, timeoutMs, temperature, think, onLine)
+        send(apiKey, model, system, user, imageJpegBase64, maxTokens, timeoutMs, temperature, think, onLine, deadline)
     } catch (e: Failure) {
         if (!thinkingRequired(think, e)) throw e
-        send(apiKey, model, system, user, imageJpegBase64, maxTokens, timeoutMs, temperature, Think.LOW, onLine)
+        send(apiKey, model, system, user, imageJpegBase64, maxOf(maxTokens, 4000), timeoutMs, temperature, Think.LOW, onLine, deadline)
     }
+
+    /**
+     * How long a streamed answer may take. [quietMs]: the longest the model may go without a sign
+     * of work, a word of the answer or of its thinking, before the first one or between them
+     * (OpenRouter's "still processing" pings keep coming while a request waits in a provider's
+     * queue, and do not count). [answerMs]: until the answer itself begins, thinking included.
+     * [totalMs]: all of it. Past any of them the call is given up, so a model that is stuck is
+     * handed to the backup instead of being waited on for minutes.
+     */
+    class Deadline(val quietMs: Long, val answerMs: Long, val totalMs: Long)
 
     /**
      * Would another model do better after [e]? Yes for what belongs to this model or its providers:
@@ -103,6 +115,7 @@ object OpenRouter {
         temperature: Double,
         think: Think,
         onLine: ((String) -> Unit)?,
+        deadline: Deadline?,
     ): String {
         val content = if (imageJpegBase64 == null) JSONObject().put("role", "user").put("content", user)
         else JSONObject().put("role", "user").put(
@@ -147,7 +160,7 @@ object OpenRouter {
                 throw Failure(code, "HTTP $code: ${text.take(160)}")
             }
             val text = if (conn.contentType.orEmpty().contains("event-stream"))
-                conn.inputStream.bufferedReader(Charsets.UTF_8).use { collect(it.lineSequence().iterator(), ::piece, onLine) }
+                conn.inputStream.bufferedReader(Charsets.UTF_8).use { collect(it.lineSequence().iterator(), ::piece, deadline = deadline, onLine = onLine) }
             else whole(conn.inputStream.bufferedReader(Charsets.UTF_8).use(BufferedReader::readText))
             val answer = text.trim()
             if (answer.isNotEmpty()) return answer
@@ -160,7 +173,12 @@ object OpenRouter {
     }
 
     /** One event of a streamed answer: some text, the error that ended it, or neither. */
-    class Piece(val text: String?, val error: Failure?)
+    class Piece(
+        val text: String?,
+        val error: Failure?,
+        /** The model is at work: a word of the answer, or of its thinking. */
+        val alive: Boolean = text != null,
+    )
 
     /** The payload of a server-sent event line; null for comments (": OPENROUTER PROCESSING") and the rest. */
     fun sseData(line: String): String? = when {
@@ -174,15 +192,37 @@ object OpenRouter {
      * gets everything so far each time a line is finished. The model's reasoning, sent as its own
      * field, is never part of the text.
      */
-    fun collect(lines: Iterator<String>, piece: (String) -> Piece, onLine: ((String) -> Unit)?): String {
+    fun collect(
+        lines: Iterator<String>,
+        piece: (String) -> Piece,
+        deadline: Deadline? = null,
+        now: () -> Long = System::currentTimeMillis,
+        onLine: ((String) -> Unit)? = null,
+    ): String {
         val out = StringBuilder()
         var shown = 0
+        val started = now()
+        var lastAlive = -1L
         for (line in lines) {
+            // Checked on every line, the pings included, which keep coming while a model waits.
+            if (deadline != null) {
+                val t = now()
+                val secs = (t - started) / 1000
+                if (lastAlive < 0 && t - started > deadline.quietMs)
+                    throw Failure(0, L.t("等了 $secs 秒还没开始写", "Nothing after ${secs}s"))
+                if (lastAlive >= 0 && t - lastAlive > deadline.quietMs)
+                    throw Failure(0, L.t("写到一半停了 ${(t - lastAlive) / 1000} 秒", "Stopped for ${(t - lastAlive) / 1000}s mid-answer"))
+                if (out.isEmpty() && t - started > deadline.answerMs)
+                    throw Failure(0, L.t("想了 $secs 秒还没开始回答", "Still thinking after ${secs}s"))
+                if (t - started > deadline.totalMs)
+                    throw Failure(0, L.t("写了 $secs 秒还没写完", "Not done after ${secs}s"))
+            }
             val data = sseData(line) ?: continue
             if (data == "[DONE]") break
             if (data.isEmpty()) continue
             val p = piece(data)
             p.error?.let { throw it }
+            if (p.alive) lastAlive = now()
             p.text?.let { out.append(it) }
             if (onLine != null) {
                 val done = out.lastIndexOf("\n") + 1
@@ -199,7 +239,11 @@ object OpenRouter {
             return Piece(null, Failure(e.optInt("code"), e.optString("message").ifBlank { "stream error" }))
         }
         val delta = o.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("delta") ?: return Piece(null, null)
-        return Piece(if (delta.isNull("content")) null else delta.optString("content"), null)
+        val text = if (delta.isNull("content")) null else delta.optString("content")
+        // The first chunk is often an empty "content" with the role, sent before any work: not a sign of life.
+        val thinking = (!delta.isNull("reasoning") && delta.optString("reasoning").isNotEmpty()) ||
+            (delta.optJSONArray("reasoning_details")?.length() ?: 0) > 0
+        return Piece(text, null, alive = !text.isNullOrEmpty() || thinking)
     }
 
     /** An answer that came back whole, as it did before streaming. */

@@ -5,9 +5,8 @@ import org.junit.Assert.*
 import org.junit.Test
 
 /**
- * The Soul chat from the bug report 「回复推荐很傻」, as laid out on screen (923 x 2000): the strip
- * of quick replies above the reply box was read as messages, so "they" had just said 「下午好」
- * and the drafts were 「下午好」「歇会」「嗯」.
+ * A Soul chat as laid out on screen (923 x 2000): the strip of quick replies above the reply box
+ * was read as messages, so "they" had just said 「下午好」 and the drafts answered that.
  */
 class ChipRowTest {
 
@@ -20,14 +19,14 @@ class ChipRowTest {
         "加速" to box(287, 168, 335, 202),        // a button under the name
     )
     private val messages = listOf(
-        "可以看看你的照片吗" to box(443, 265, 730, 300),
-        "what" to box(193, 590, 268, 625),
-        "no" to box(193, 755, 230, 785),
+        "周末一起去看展好吗" to box(443, 265, 730, 300),
+        "哪个" to box(193, 590, 268, 625),
+        "嗯" to box(193, 755, 230, 785),
         "14:16" to box(432, 870, 492, 895),
-        "这么害羞" to box(602, 965, 730, 1000),
-        "不是美女，有什么好看的" to box(193, 1292, 548, 1328),
+        "去不去嘛" to box(602, 965, 730, 1000),
+        "最近太忙了，下次再说吧" to box(193, 1292, 548, 1328),
         "14:25" to box(432, 1410, 492, 1435),
-        "自信才是美女" to box(540, 1505, 730, 1540),
+        "那等你忙完呀" to box(540, 1505, 730, 1540),
     )
     private val chips = listOf(
         "下午好" to box(115, 1758, 210, 1792),
@@ -43,7 +42,7 @@ class ChipRowTest {
 
     @Test fun theQuickReplyStripIsNotMessages() {
         val bubbles = read(title + messages + chips)
-        assertEquals(listOf("可以看看你的照片吗", "what", "no", "这么害羞", "不是美女，有什么好看的", "自信才是美女"), bubbles.map { it.text })
+        assertEquals(listOf("周末一起去看展好吗", "哪个", "嗯", "去不去嘛", "最近太忙了，下次再说吧", "那等你忙完呀"), bubbles.map { it.text })
         assertEquals(listOf(false, true, true, false, true, false), bubbles.map { it.incoming })
         // My message is the newest: nothing to answer, and no card pops up by itself.
         assertNull(Chat.triggerKey(Chat.order(bubbles)))
@@ -52,7 +51,7 @@ class ChipRowTest {
     @Test fun theStripGoesInWhateverOrderTheTreeListsIt() {
         // The node tree is walked last child first, and repeats nodes.
         val bubbles = read(chips.reversed() + messages + chips.take(2) + title)
-        assertEquals("自信才是美女", Chat.order(bubbles).last().text)
+        assertEquals("那等你忙完呀", Chat.order(bubbles).last().text)
         assertFalse(bubbles.any { it.text in setOf("下午好", "礼物", "桌球", "比心", "猜拳") })
     }
 
@@ -60,7 +59,7 @@ class ChipRowTest {
         val hint = "不知道说啥，讲个笑话也行" to box(145, 1865, 550, 1900)
         val (bubbles, _) = Chat.fromOcr(title + messages + chips + hint, win, emptyList())
         assertFalse(bubbles.any { it.text in setOf("下午好", "礼物", "比心", "猜拳", "38", "加速") })
-        assertTrue(bubbles.map { it.text }.containsAll(listOf("what", "这么害羞", "自信才是美女")))
+        assertTrue(bubbles.map { it.text }.containsAll(listOf("哪个", "去不去嘛", "那等你忙完呀")))
     }
 
     @Test fun whatSitsInTheTitleBarIsNotAMessage() {
@@ -81,7 +80,7 @@ class ChipRowTest {
         )
         assertEquals(listOf("嗯", "好", "行", "ok"), read(items, null).map { it.text })
         // Two side by side are not a strip either: a message and a floating badge.
-        assertEquals(2, Chat.messageIndices(listOf("这么害羞" to box(602, 965, 730, 1000), "3" to box(836, 950, 856, 985)), win).size)
+        assertEquals(2, Chat.messageIndices(listOf("去不去嘛" to box(602, 965, 730, 1000), "3" to box(836, 950, 856, 985)), win).size)
     }
 
     @Test fun theComposeAreaGoesWhereverTheKeyboardPushesIt() {
@@ -99,7 +98,7 @@ class ChipRowTest {
         val row = Chat.replyRowAbove(ime, win)!!
         val items = listOf(
             "你是？" to box(193, 950, 290, 990),
-            "对我有点" to box(145, 1140, 300, 1180),    // a draft being typed, right above the keys
+            "等我一下" to box(145, 1140, 300, 1180),    // a draft being typed, right above the keys
         )
         val (bubbles, _) = Chat.fromOcr(items, win, listOf(ime), row)
         assertEquals(listOf("你是？"), bubbles.map { it.text })
@@ -124,9 +123,9 @@ class ReplyPromptTest {
     @After fun chinese() { L.en = false }
 
     @Test fun theReadLineIsShownApartFromTheDrafts() {
-        val r = OpenRouter.replies("判断：你刚夸完 Ta 还没回，先别追着照片问\n1. 哈哈不看也行，那你平时都玩啥\n2. 开玩笑的啦，不勉强你～\n3. 好啦不闹你了，今天过得咋样")
-        assertEquals("你刚夸完 Ta 还没回，先别追着照片问", r.read)
-        assertEquals(listOf("哈哈不看也行，那你平时都玩啥", "开玩笑的啦，不勉强你～", "好啦不闹你了，今天过得咋样"), r.drafts)
+        val r = OpenRouter.replies("判断：你刚约了 Ta 还没回，先别追问\n1. 不急，你看哪天方便\n2. 忙完记得休息呀～\n3. 好啦不催你了，今天过得咋样")
+        assertEquals("你刚约了 Ta 还没回，先别追问", r.read)
+        assertEquals(listOf("不急，你看哪天方便", "忙完记得休息呀～", "好啦不催你了，今天过得咋样"), r.drafts)
         val md = OpenRouter.replies("**判断**：轮到你回\n1. 好\n2. 行")
         assertEquals("轮到你回", md.read)
         assertEquals(listOf("好", "行"), md.drafts)
@@ -146,11 +145,11 @@ class ReplyPromptTest {
     }
 
     @Test fun thePromptSaysWhoseTurnItIs() {
-        assertEquals("最后一句是我说的（「自信才是美女」），Ta 还没回。", OpenRouter.turn(listOf("对方" to "不是美女，有什么好看的", "我" to "自信才是美女")))
+        assertEquals("最后一句是我说的（「那等你忙完呀」），Ta 还没回。", OpenRouter.turn(listOf("对方" to "最近太忙了，下次再说吧", "我" to "那等你忙完呀")))
         assertEquals("最后一句是 Ta 说的，轮到我了。", OpenRouter.turn(listOf("对方" to "在吗")))
         assertNull(OpenRouter.turn(emptyList()))
-        val p = OpenRouter.deepPrompt("…", "", null, null, null, listOf("对方" to "no", "我" to "这么害羞"), emptyMap(), false, false)
-        assertTrue(p.contains("最后一句是我说的（「这么害羞」），Ta 还没回。"))
+        val p = OpenRouter.deepPrompt("…", "", null, null, null, listOf("对方" to "嗯", "我" to "去不去嘛"), emptyMap(), false, false)
+        assertTrue(p.contains("最后一句是我说的（「去不去嘛」），Ta 还没回。"))
         assertTrue("Jev's read is a hint, not an order", p.contains("以对话为准"))
         L.en = true
         assertTrue(OpenRouter.turn(listOf("我" to "you up?"))!!.startsWith("The last message is mine"))
@@ -193,7 +192,7 @@ class ArchiveContextTest {
 
     @Test fun soulsStripKeptByOlderVersionsIsDropped() {
         val strip = listOf("我" to "猜拳", "我" to "比心", "对方" to "礼物", "对方" to "下午好")
-        val real = listOf("对方" to "不是美女，有什么好看的", "我" to "自信才是美女")
+        val real = listOf("对方" to "最近太忙了，下次再说吧", "我" to "那等你忙完呀")
         assertEquals(real + real, Archive.withoutStrips(real + strip + real))
         assertEquals(real, Archive.withoutStrips(real + strip))
         // What people do send stays: a greeting, goodnights, one sticker word, two in a row.
@@ -244,12 +243,31 @@ class StreamTest {
 
     @After fun chinese() { L.en = false }
 
-    /** What the tests use in place of org.json: "text:…" is a piece of text, "error:…" an error. */
+    /**
+     * What the tests use in place of org.json: "text:…" is a piece of text, "think:…" a piece of
+     * the model's thinking, "error:…" an error.
+     */
     private fun piece(data: String): OpenRouter.Piece = when {
         data.startsWith("error:") -> OpenRouter.Piece(null, OpenRouter.Failure(0, data.removePrefix("error:")))
         data.startsWith("text:") -> OpenRouter.Piece(data.removePrefix("text:").replace("\\n", "\n"), null)
+        data.startsWith("think:") -> OpenRouter.Piece(null, null, alive = true)
         else -> OpenRouter.Piece(null, null)
     }
+
+    private val ping = ": OPENROUTER PROCESSING"
+
+    /** A stream read against a clock: each line arrives at its second. */
+    private fun timed(deadline: OpenRouter.Deadline, vararg lines: Pair<Int, String>): String {
+        var clock = 0L
+        val it = lines.map { (sec, line) -> { clock = sec * 1000L; line } }.iterator()
+        val stream = object : Iterator<String> {
+            override fun hasNext() = it.hasNext()
+            override fun next() = it.next()()
+        }
+        return OpenRouter.collect(stream, ::piece, deadline, now = { clock })
+    }
+
+    private val drafts = OpenRouter.Deadline(quietMs = 40_000, answerMs = 75_000, totalMs = 150_000)
 
     @Test fun eventLinesAreReadAndCommentsSkipped() {
         assertEquals("{\"a\":1}", OpenRouter.sseData("data: {\"a\":1}"))
@@ -263,22 +281,61 @@ class StreamTest {
         val stream = listOf(
             ": OPENROUTER PROCESSING",
             "data: text:判断：你刚",
-            "data: text:说完\\n1. 哈哈",
+            "data: text:约完\\n1. 不急",
             "",
             "data: reasoning-only chunk",
-            "data: text:不看也行\\n2. 开玩笑的",
-            "data: text:啦",
+            "data: text:你慢慢看\\n2. 忙完记得休息",
+            "data: text:呀",
             "data: [DONE]",
             "data: text:never read",
         )
         val shown = ArrayList<String>()
         val all = OpenRouter.collect(stream.iterator(), ::piece) { shown += it }
-        assertEquals("判断：你刚说完\n1. 哈哈不看也行\n2. 开玩笑的啦", all)
-        assertEquals(listOf("判断：你刚说完\n", "判断：你刚说完\n1. 哈哈不看也行\n"), shown)
+        assertEquals("判断：你刚约完\n1. 不急你慢慢看\n2. 忙完记得休息呀", all)
+        assertEquals(listOf("判断：你刚约完\n", "判断：你刚约完\n1. 不急你慢慢看\n"), shown)
         // What is shown can already be parsed into the read and the finished drafts.
         val r = OpenRouter.replies(shown.last())
-        assertEquals("你刚说完", r.read)
-        assertEquals(listOf("哈哈不看也行"), r.drafts)
+        assertEquals("你刚约完", r.read)
+        assertEquals(listOf("不急你慢慢看"), r.drafts)
+    }
+
+    @Test fun aModelStuckInAQueueIsGivenUpOnDespiteThePings() {
+        val e = assertThrows(OpenRouter.Failure::class.java) {
+            timed(drafts, 0 to ping, 10 to ping, 20 to ping, 30 to ping, 41 to ping, 45 to "data: text:too late")
+        }
+        assertEquals("等了 41 秒还没开始写", e.message)
+        assertTrue("the backup is asked", OpenRouter.worthAnotherModel(e))
+    }
+
+    @Test fun anAnswerThatIsComingIsWaitedFor() {
+        assertEquals("好呀\n周末见", timed(drafts, 0 to ping, 30 to "data: text:好呀\\n", 65 to "data: text:周末见", 70 to "data: [DONE]"))
+        // Thinking is work too: nothing written for a minute, but thinking all the while.
+        assertEquals("嗯", timed(drafts, 0 to ping, 25 to "data: think:…", 55 to "data: think:…", 70 to "data: text:嗯", 72 to "data: [DONE]"))
+        // No deadline, no clock: as long as it takes.
+        assertEquals("嗯", OpenRouter.collect(listOf(ping, "data: text:嗯").iterator(), ::piece))
+    }
+
+    @Test fun thinkingThatNeverTurnsIntoAnAnswerIsGivenUpOn() {
+        val e = assertThrows(OpenRouter.Failure::class.java) {
+            timed(drafts, 20 to "data: think:…", 40 to "data: think:…", 60 to "data: think:…", 76 to "data: think:…")
+        }
+        assertEquals("想了 76 秒还没开始回答", e.message)
+    }
+
+    @Test fun anAnswerThatStopsHalfWayIsGivenUpOn() {
+        val e = assertThrows(OpenRouter.Failure::class.java) {
+            timed(drafts, 5 to "data: text:好", 20 to ping, 46 to ping, 50 to "data: text:的")
+        }
+        assertEquals("写到一半停了 41 秒", e.message)
+        L.en = true
+        val en = assertThrows(OpenRouter.Failure::class.java) { timed(drafts, 0 to ping, 50 to ping) }
+        assertEquals("Nothing after 50s", en.message)
+    }
+
+    @Test fun anAnswerIsNotWrittenForever() {
+        val steady = (0..16).map { it * 10 to "data: text:字" }.toTypedArray()
+        val e = assertThrows(OpenRouter.Failure::class.java) { timed(drafts, *steady) }
+        assertEquals("写了 160 秒还没写完", e.message)
     }
 
     @Test fun anErrorInTheStreamEndsIt() {
@@ -359,8 +416,8 @@ class StreamTest {
 }
 
 /**
- * The bug report with 🍵 in the title: a notification sliding over the title bar was cut out
- * and kept as the picture of the person's name ("…improvements and QoL feat… vibecheck · Default").
+ * An emoji name in the title: a notification sliding over the title bar was cut out and kept as
+ * the picture of the person's name.
  */
 class NamePictureTest {
 
@@ -419,10 +476,10 @@ class PeoplePageTest {
     @After fun chinese() { L.en = false }
 
     @Test fun oneLineAboutThemComesFromHowYouGetAlong() {
-        val profile = "【Ta 是谁】\n• 在上海做设计\n【我们怎么相处】\n• 我们互怼很凶，但有事第一个找对方\n【Ta 喜欢】\n• 猫"
-        assertEquals("我们互怼很凶，但有事第一个找对方", Profile.oneLine(profile))
-        assertEquals("在上海做设计", Profile.oneLine("【Ta 是谁】\n• 在上海做设计"))
-        assertEquals("对方是我的好友或死党，关系亲密，…", Profile.oneLine("• 对方是我的好友或死党，关系亲密，彼此可以随意开玩笑、互怼。", max = 17))
+        val profile = "【Ta 是谁】\n• 在杭州当老师\n【我们怎么相处】\n• 常一起吐槽工作，有事第一个找对方\n【Ta 喜欢】\n• 爬山"
+        assertEquals("常一起吐槽工作，有事第一个找对方", Profile.oneLine(profile))
+        assertEquals("在杭州当老师", Profile.oneLine("【Ta 是谁】\n• 在杭州当老师"))
+        assertEquals("对方是我的好友，关系亲密，说话很…", Profile.oneLine("• 对方是我的好友，关系亲密，说话很随便，常互相开玩笑。", max = 17))
         assertNull(Profile.oneLine(""))
     }
 

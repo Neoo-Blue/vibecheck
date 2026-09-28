@@ -72,6 +72,8 @@ class MainActivity : Activity() {
     private var loaded = false
 
     private lateinit var readiness: TextView
+    /** Says the app closed unexpectedly last time, until dismissed; hidden otherwise. */
+    private lateinit var crashBanner: LinearLayout
     private lateinit var checklist: LinearLayout
     private lateinit var setupPage: ScrollView
     private lateinit var toolsPage: ScrollView
@@ -96,6 +98,9 @@ class MainActivity : Activity() {
 
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         root.addView(header())
+        crashBanner = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }.also {
+            root.addView(it, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { leftMargin = dp(14); rightMargin = dp(14); topMargin = dp(6) })
+        }
         readiness = text("", 13f, sub()).also {
             root.addView(it, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { leftMargin = dp(20); rightMargin = dp(20) })
         }
@@ -137,6 +142,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        refreshCrashBanner()
         refreshSetup()
         refreshTools()
         refreshPeople()
@@ -166,6 +172,36 @@ class MainActivity : Activity() {
             v.setPadding(bars.left, bars.top, bars.right, maxOf(bars.bottom, ime.bottom))
             insets
         }
+    }
+
+    /**
+     * When the app or its service last ended because something went wrong (a crash, including
+     * one in native code, "not responding", or being killed for memory): what it was, with a
+     * button to copy the details and send them on.
+     */
+    private fun refreshCrashBanner() {
+        val b = crashBanner
+        b.removeAllViews()
+        val record = Crash.unseenExit(this)
+        if (record == null) { b.visibility = View.GONE; return }
+        b.visibility = View.VISIBLE
+        b.setPadding(dp(14), dp(10), dp(14), dp(4))
+        b.background = rounded(tileBg(), dp(12))
+        b.addView(text(L.t("Vibecheck 上次意外退出了", "Vibecheck closed unexpectedly last time"), 15f, warn(), bold = true))
+        b.addView(text(record.lineSequence().first().take(200), 12f, fg()).apply { setPadding(0, dp(4), 0, 0) })
+        b.addView(text(L.t(
+            "点「复制原因」把完整记录发过来，就能查到是哪里出的问题。「工具 → 诊断」里也能看到。",
+            "Copy the details and send them on to find out what went wrong. They are under Tools → Diagnostics too."), 12f, sub()).apply {
+            setPadding(0, dp(4), 0, dp(8))
+        })
+        b.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(pill(L.t("复制原因", "Copy details"), true) {
+                getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("vibecheck", Crash.report(record)))
+                toast(L.t("已复制", "Copied"))
+            })
+            addView(pill(L.t("知道了", "Dismiss"), false) { Crash.dismissExit(this@MainActivity); refreshCrashBanner() })
+        })
     }
 
     // ---- frame: title, language, tabs ----
@@ -506,7 +542,11 @@ class MainActivity : Activity() {
         val log = Diag.dump().lines().takeLast(8).filter { it.isNotBlank() }
         if (log.isNotEmpty()) { lines.add(""); lines.addAll(log) }
         // What went wrong last, kept across restarts: long-press to copy it and send it on.
-        Crash.last()?.let { lines.add(""); lines.add(L.t("上次出错（长按可复制）：", "Last crash (long-press to copy):")); lines.addAll(it.lines().take(16)) }
+        val last = Crash.last()
+        Crash.lastExit()?.takeIf { it != last }?.let {
+            lines.add(""); lines.add(L.t("上次意外退出（长按可复制）：", "Last unexpected exit (long-press to copy):")); lines.addAll(it.lines().take(16))
+        }
+        last?.let { lines.add(""); lines.add(L.t("上次出错（长按可复制）：", "Last error (long-press to copy):")); lines.addAll(it.lines().take(16)) }
         d.text = lines.joinToString("\n")
     }
 

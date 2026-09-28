@@ -71,14 +71,14 @@ class LearnProgressTest {
     }
 
     @Test fun aQuoteOfMyMessageUnderTheirsIsNotTheirs() {
-        // 5:45 in the 🍵 chat: they quoted my 「女大 is no more」 under their own message.
-        val mine = Chat.Bubble("女大 is no more", false, box(300))
-        val theirs = Chat.Bubble("The more I want to know the more 醋", true, box(560))
-        val quote = Chat.Bubble("A°：女大is no more", true, box(700))
-        val next = Chat.Bubble("I don't like", true, box(820))
+        // They quoted my 「周六 works for me」 under their own message; OCR lost the space and misread my name.
+        val mine = Chat.Bubble("周六 works for me", false, box(300))
+        val theirs = Chat.Bubble("The more I think the more I want to go", true, box(560))
+        val quote = Chat.Bubble("Ken：周六works for me", true, box(700))
+        val next = Chat.Bubble("I don't know", true, box(820))
         assertEquals(listOf(mine, theirs, next), Chat.withoutEchoes(listOf(mine, theirs, quote, next)))
         // A long one cut short with "…".
-        val cut = Chat.Bubble("Lily：The more I want to know…", false, box(900))
+        val cut = Chat.Bubble("Mia：The more I think…", false, box(900))
         assertEquals(listOf(mine, theirs), Chat.withoutEchoes(listOf(mine, theirs, cut)))
     }
 

@@ -33,7 +33,7 @@ class MeTest {
     private val day = listOf(
         Me.Line("09:10", "我", "小明", "早，今天去公司加班"),
         Me.Line("09:12", "对方", "小明", "周末还加班？"),
-        Me.Line("12:30", "我", "🍵", "中午吃了拉面"),
+        Me.Line("12:30", "我", "🌙", "中午吃了拉面"),
         Me.Line("21:05", "我", "小明", "终于下班了，周六去爬山吧"),
     )
 
@@ -41,7 +41,7 @@ class MeTest {
         val p = Me.dayPrompt("2026-09-27", day)
         assertTrue(p.startsWith("9月27日 周日"))
         assertTrue(p.contains("【和 小明 的聊天】\n09:10 我：早，今天去公司加班\n09:12 小明：周末还加班？\n21:05 我："))
-        assertTrue(p.contains("【和 🍵 的聊天】\n12:30 我：中午吃了拉面"))
+        assertTrue(p.contains("【和 🌙 的聊天】\n12:30 我：中午吃了拉面"))
         // Too long: the morning goes before the evening does.
         val long = (0 until 400).map { Me.Line("%02d:%02d".format(it / 60 % 24, it % 60), "我", "小明", "消息$it " + "字".repeat(80)) }
         val cut = Me.dayPrompt("2026-09-27", long, maxChars = 5000)
@@ -51,12 +51,12 @@ class MeTest {
     }
 
     @Test fun whatISaidElsewhereTodayLeavesOutThisChatAndTheirLines() {
-        val e = Me.elsewhereToday(day, notPerson = "🍵")!!
+        val e = Me.elsewhereToday(day, notPerson = "🌙")!!
         assertTrue(e.contains("对 小明：早，今天去公司加班"))
         assertTrue(e.contains("终于下班了"))
         assertFalse(e.contains("拉面"))
         assertFalse("their lines are not mine", e.contains("周末还加班"))
-        assertNull(Me.elsewhereToday(day.filter { it.person == "🍵" }, notPerson = "🍵"))
+        assertNull(Me.elsewhereToday(day.filter { it.person == "🌙" }, notPerson = "🌙"))
     }
 
     private val profile = """
