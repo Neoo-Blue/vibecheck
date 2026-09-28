@@ -55,6 +55,20 @@ object OpenRouter {
         send(apiKey, model, system, user, imageJpegBase64, maxTokens, timeoutMs, temperature, Think.LOW, onLine)
     }
 
+    /**
+     * Would another model do better after [e]? Yes for what belongs to this model or its providers:
+     * busy, down, refusing, cut off, an empty answer. No for a rejected key, an empty balance or no
+     * network at all, which every model meets the same.
+     */
+    fun worthAnotherModel(e: Throwable): Boolean {
+        val s = (e as? Failure)?.status
+        return when {
+            s == 401 || s == 402 -> false
+            e is java.net.UnknownHostException || e is java.net.ConnectException -> false
+            else -> true
+        }
+    }
+
     /** "No endpoints found that support image input": a text-only model was sent a screenshot. */
     fun noImages(e: Throwable): Boolean =
         e is Failure && (e.status == 404 || e.status == 400) && e.message.orEmpty().contains("image", ignoreCase = true)

@@ -281,7 +281,10 @@ are cached by the stretch's content and saved as each one lands, so a later Lear
 what is new. The card shows how far it has got: the step, a bar with the stretches done, the
 time taken and an estimate of what is left, redrawn every few seconds (the person's page in the
 app shows the same). Ten minutes with no sign of life and it says it looks stuck; Learn then
-starts it again, keeping the stretches already done. Each call is tried again after a pause if the
+starts it again, keeping the stretches already done. The person's page in the app can also
+write the profile again from the kept history without opening the chat (only the stretches that
+changed, or everything after a model change). When a call fails in a way another model might
+not, the other model set in Setup is asked the same. Each call is tried again after a pause if the
 connection drops, and a write that still loses its connection carries on by itself when you are
 back in that chat. The profile starts with what they are to you and how close you are, then
 sections: who they are, how you get along, how they talk, how you talk to them (both with
