@@ -151,11 +151,39 @@ object Chat {
      */
     fun messageIndices(items: List<Pair<String, Box>>, win: Box, input: Box? = null): List<Int> {
         val strip = sideBySide(items)
+        val quoted = repliedTo(items, win)
         return items.indices.filter { i ->
             val (text, box) = items[i]
-            i !in strip && !isChrome(box, text, win) && (input == null || (box.top + box.bottom) / 2 < input.top)
+            i !in strip && i !in quoted && !isChrome(box, text, win) && (input == null || (box.top + box.bottom) / 2 < input.top)
         }
     }
+
+    /**
+     * Messenger and Instagram put the message a reply answers right under "Sam replied to you" /
+     * "You replied to Sam", faded, on the replier's side, with the reply below it: that text is
+     * not a new message, and its words are the other person's. The label and the text right under
+     * it; a reply to a photo has no text there, and the reply itself is further down.
+     */
+    fun repliedTo(items: List<Pair<String, Box>>, win: Box): Set<Int> {
+        val close = (win.bottom - win.top) * 0.035
+        val out = HashSet<Int>()
+        for ((i, item) in items.withIndex()) {
+            val (text, label) = item
+            if (!REPLY_LABEL.matches(text.trim())) continue
+            out += i
+            items.indices
+                .filter { j -> j != i && items[j].second.top >= label.bottom - 2 && items[j].second.top - label.bottom <= close }
+                .minByOrNull { items[it].second.top }
+                ?.let { out += it }
+        }
+        return out
+    }
+
+    /** Only as the whole text, by a name or "You": "she finally replied to you" is a message. */
+    private val REPLY_LABEL = Regex(
+        """you replied to ($ACTOR|yourself|themselves)|$ACTOR replied to (you|yourself|themselves|himself|herself)|replied to (you|yourself)|you replied""",
+        RegexOption.IGNORE_CASE,
+    )
 
     /**
      * The texts that sit beside two or more others on one row: a strip of quick replies,
@@ -270,36 +298,100 @@ object Chat {
     }
 
     /**
-     * WeChat shows a quoted message under the reply, on the replier's side: 「名字：原话」. Their
-     * words quoted under my reply read as mine, so a text that starts with their name and a colon
-     * is a quote, not a message. [peer] is the name in the title bar.
+     * A reply that quotes an earlier message shows that message with it, on the replier's side:
+     * WeChat and Soul under the reply as 「名字：原话」, QQ above it. Read as a message it is the
+     * replier's, while the words are the quoted person's: my words quoted under their reply were
+     * "theirs", their words quoted under mine were "mine". Whose name and what they said, or null
+     * for a text that is not shaped like a quote (a link's "https:", a time's "10:30").
      */
-    fun withoutQuotes(bubbles: List<Bubble>, peer: String): List<Bubble> {
-        val name = peer.trim()
-        if (name.isEmpty()) return bubbles
-        val quote = Regex("""^\s*${Regex.escape(name)}\s*[：:]\s*\S""")
-        return bubbles.filterNot { quote.containsMatchIn(it.text) }
+    fun quoteOf(text: String): Pair<String, String>? {
+        val m = QUOTE.find(text) ?: return null
+        val name = m.groupValues[1].trim()
+        val said = m.groupValues[2].trim()
+        if (said.startsWith("//") || (name.isNotEmpty() && name.all { it.isDigit() })) return null
+        return name to said
+    }
+
+    /** A name of up to 24 characters (none, where OCR could not read an emoji name), a colon, and what they said. */
+    private val QUOTE = Regex("""^\s*(.{0,24}?)\s*[：:]\s*(.+)$""")
+
+    /** The same name, whatever the spacing and case. */
+    fun sameName(a: String, b: String): Boolean {
+        val x = a.filterNot { it.isWhitespace() }.lowercase()
+        return x.isNotEmpty() && x == b.filterNot { it.isWhitespace() }.lowercase()
     }
 
     /**
-     * A quote of a message further up the screen, whoever is quoted: 「名字：原话」 where the words
-     * after the colon are that message (WeChat cuts a long one short with "…"). Their quote of my
-     * message sits on their side under my name, which is not theirs and which OCR cannot always
-     * read (「Ken：周六works for me」 under their own message): the words give it away instead.
+     * Is this text a quote rather than a message? When its name is one of [names] (theirs as the
+     * title shows it, mine as quotes of my messages have shown it); when the name is one OCR
+     * cannot read, an emoji ([emojiName]: theirs is one, so a name of a stray mark or a letter or
+     * two is how OCR reads it; or no name at all before the colon); and when what was quoted is a
+     * picture, a voice message, a sticker, which WeChat writes as 「名字：[图片]」.
      */
-    fun withoutEchoes(bubbles: List<Bubble>): List<Bubble> =
-        bubbles.filterIndexed { i, b ->
-            val m = QUOTE.find(b.text) ?: return@filterIndexed true
-            val said = norm(m.groupValues[2]).trimEnd('…', '.', '。')
-            if (said.length < 2 || said.startsWith("//")) return@filterIndexed true
-            bubbles.subList(0, i).none { other ->
-                val o = norm(other.text)
-                o == said || (said.length >= 4 && o.startsWith(said)) || close(o, said)
-            }
-        }
+    fun isQuote(text: String, names: Collection<String> = emptyList(), emojiName: Boolean = false): Boolean {
+        val (name, said) = quoteOf(text) ?: return false
+        if (names.any { sameName(it, name) }) return true
+        val words = said.count { Character.isIdeographic(it.code) } >= 2 || said.count { it.isLetterOrDigit() } >= 4
+        if (words && name.none { it.isLetterOrDigit() }) return true
+        if (words && emojiName && name.length <= 2 && name.none { Character.isIdeographic(it.code) }) return true
+        return name.isNotEmpty() && said in PLACEHOLDERS
+    }
 
-    /** A name of up to 24 characters, a colon, and what they said. */
-    private val QUOTE = Regex("""^\s*(.{1,24}?)\s*[：:]\s*(.+)$""")
+    /** What WeChat writes in place of what cannot be quoted as text. */
+    private val PLACEHOLDERS = setOf(
+        "[图片]", "[视频]", "[语音]", "[动画表情]", "[表情]", "[文件]", "[链接]", "[位置]", "[聊天记录]", "[名片]",
+        "[音乐]", "[小程序]", "[红包]", "[转账]", "[Photo]", "[Video]", "[Voice]", "[Sticker]", "[File]", "[Link]", "[Location]",
+    )
+
+    /** Everything but the quotes ([isQuote]). */
+    fun withoutQuotes(bubbles: List<Bubble>, names: Collection<String>, emojiName: Boolean = false): List<Bubble> =
+        bubbles.filterNot { isQuote(it.text, names, emojiName) }
+
+    /** Everything but the quotes of [peer], the name in the title bar. */
+    fun withoutQuotes(bubbles: List<Bubble>, peer: String): List<Bubble> = withoutQuotes(bubbles, listOf(peer))
+
+    /**
+     * A quote of a message further up the screen, or among the newest ones kept ([kept]), whoever
+     * is quoted: 「名字：原话」 where the words after the colon are that message (WeChat cuts a long
+     * one short with "…"). Their quote of my message sits on their side under my name, which is
+     * not theirs and which OCR cannot always read (「Ken：周六works for me」 under their own
+     * message): the words give it away instead.
+     */
+    fun withoutEchoes(bubbles: List<Bubble>, kept: List<Pair<String, String>> = emptyList()): List<Bubble> =
+        bubbles.filterIndexed { i, b -> echoed(b.text, bubbles.subList(0, i).map { (if (it.incoming) "对方" else "我") to it.text }, kept) == null }
+
+    /**
+     * Whose words a quote repeats: "我" or "对方", from the message it quotes on [screen] (before
+     * it) or in [kept]. Null when the text is not a quote of either. Among the many lines kept,
+     * a few words like 「好的」 come up again and again, and 「他说：好的」 is a message: only
+     * words of four characters or more are looked for there.
+     */
+    fun echoed(text: String, screen: List<Pair<String, String>>, kept: List<Pair<String, String>> = emptyList()): String? {
+        val (_, quoted) = quoteOf(text) ?: return null
+        val said = norm(quoted).trimEnd('…', '.', '。')
+        if (said.length < 2) return null
+        fun repeats(o: String) = o == said || (said.length >= 4 && o.startsWith(said)) || close(o, said)
+        screen.asReversed().firstOrNull { repeats(norm(it.second)) }?.let { return it.first }
+        if (said.length < 4) return null
+        return kept.asReversed().firstOrNull { repeats(norm(it.second)) }?.first
+    }
+
+    /**
+     * My own name in an app, as quotes of my messages show it: a quote on [screen] whose words are
+     * a message of mine there or among [kept] gives it away. Names in [not] (theirs) are never
+     * mine. What the service remembers per app, so that the next quote of my words is known for
+     * one even when my message is long off screen.
+     */
+    fun myQuotedNames(screen: List<Bubble>, kept: List<Pair<String, String>>, not: Collection<String>): Set<String> {
+        val out = LinkedHashSet<String>()
+        for ((i, b) in screen.withIndex()) {
+            val name = quoteOf(b.text)?.first ?: continue
+            if (name.none { it.isLetter() } || name.length > 24 || not.any { sameName(it, name) }) continue
+            val before = screen.subList(0, i).map { (if (it.incoming) "对方" else "我") to it.text }
+            if (echoed(b.text, before, kept) == "我") out += name
+        }
+        return out
+    }
 
     /**
      * Where the reply box is while the keyboard is up, for a screen read by OCR, which has no text

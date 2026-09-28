@@ -17,6 +17,23 @@ heading matches the tag.
     Otherwise it stops, and so does every read still due.
   - A screen picture read while you switched apps is dropped.
   - Unchecking an app whose chat is open takes the card down at once, not at the next switch.
+- **Quoted replies no longer mix up who said what.**
+  - A reply that quotes an earlier message shows that message with it, on the replier's side:
+    「名字：原话」 in WeChat and Soul, a faded message under "Sam replied to you" in Messenger and
+    Instagram.
+  - Read as a message, your words quoted under their reply were theirs, and theirs quoted under
+    yours were yours. This reached judgments, drafts, profiles and the kept history.
+  - Until now a quote was only known when it started with their name, or repeated a message
+    still on screen.
+  - Now it is also known by:
+    - your own name in that app, which the app remembers from their quotes of your words, so
+      your words are never theirs, even long after your message scrolled away;
+    - a name OCR cannot read, meaning an emoji;
+    - a quoted picture, voice message or sticker (「名字：[图片]」);
+    - words that repeat one of the newest messages kept.
+  - Quotes kept as messages by earlier versions are taken out of the kept history when it is
+    read, so profiles and drafts written from it no longer have them. A profile written before
+    can be written again from the person's page.
 
 ## 6.8.9
 

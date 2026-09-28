@@ -73,6 +73,27 @@ object Archive {
         return lines.filterIndexed { k, _ -> !d[k] }
     }
 
+    /**
+     * Quotes kept as if they were messages, by versions that read a quote as the replier's words:
+     * my words quoted under their reply were kept as theirs, and theirs under mine as mine. A line
+     * shaped like one (Chat.quoteOf) goes when it repeats one of the [LOOK_BACK] lines before it,
+     * or when Chat.isQuote says so from its name ([names], [emojiName]) or what it quotes.
+     */
+    fun withoutQuotes(lines: List<Pair<String, String>>, names: Collection<String> = emptyList(), emojiName: Boolean = false): List<Pair<String, String>> {
+        var drop: BooleanArray? = null
+        for (i in lines.indices) {
+            val text = lines[i].second
+            if (Chat.quoteOf(text) == null) continue
+            if (Chat.isQuote(text, names, emojiName) || Chat.echoed(text, emptyList(), lines.subList(maxOf(0, i - LOOK_BACK), i)) != null)
+                (drop ?: BooleanArray(lines.size).also { drop = it })[i] = true
+        }
+        val d = drop ?: return lines
+        return lines.filterIndexed { k, _ -> !d[k] }
+    }
+
+    /** How far back a quote's message is looked for. */
+    private const val LOOK_BACK = 80
+
     private val STRIP_GAMES = setOf("礼物", "桌球", "比心", "猜拳", "骰子")
     private val STRIP_LABELS = STRIP_GAMES + setOf("早上好", "上午好", "中午好", "下午好", "晚上好", "晚安")
 
