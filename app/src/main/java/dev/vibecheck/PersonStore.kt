@@ -214,7 +214,14 @@ class PersonStore(ctx: Context) {
         val stamp = pictureFile(c).lastModified()
         if (stamp == 0L) { pictures.remove(c); return null }
         pictures[c]?.takeIf { it.first == stamp }?.let { return it.second }
-        return runCatching { BitmapFactory.decodeFile(pictureFile(c).path) }.getOrNull()?.also { pictures[c] = stamp to it }
+        val picture = runCatching { BitmapFactory.decodeFile(pictureFile(c).path) }.getOrNull() ?: return null
+        // Kept by an older version from a strip under the title bar: gone, so a right one is taken.
+        if (!Person.plausiblePicture(picture.width, picture.height)) {
+            deleteNamePicture(c)
+            return null
+        }
+        pictures[c] = stamp to picture
+        return picture
     }
 
     fun hasNamePicture(id: String): Boolean = pictureFile(id).exists()
@@ -296,7 +303,12 @@ class PersonStore(ctx: Context) {
 
     /** The kept history of one chat, oldest first; empty when it has none. */
     fun archive(own: String): List<Pair<String, String>> =
-        runCatching { file(own).takeIf { it.exists() }?.readText()?.let { Archive.withoutStrips(Archive.decode(it)) } }.getOrNull() ?: emptyList()
+        runCatching {
+            file(own).takeIf { it.exists() }?.readText()?.let { text ->
+                // Kept before they were known not to be messages: call records (「已取消」, "Canceled O"), voice lengths.
+                Archive.withoutStrips(Archive.decode(text)).filterNot { Chat.isNotification(it.second) }
+            }
+        }.getOrNull() ?: emptyList()
 
     /** Everything kept for a person: their chat's history and every linked chat's. */
     fun archiveAll(id: String): List<Pair<String, String>> {

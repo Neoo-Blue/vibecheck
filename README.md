@@ -86,7 +86,8 @@ The app has three tabs, and everything saves as you go:
   **Card** (text size, which buttons the card shows, buzz on high risk, bubble position),
   **Usage** (paid calls today and in total), **Backup** (export / import people memory as a file;
   keys are not included), **Keep it running** (battery optimisation and app info shortcuts),
-  **Diagnostics** (live status, debug mode, the LAN endpoint) and **How it works**.
+  **Diagnostics** (live status, the last crash with where and when, debug mode, the LAN endpoint)
+  and **How it works**.
 
 Every tile has a **Hide** button. Hidden tiles collect at the bottom of the Tools tab, where one
 tap brings a tile back (or **Show all**), so the dashboard only shows what you use.

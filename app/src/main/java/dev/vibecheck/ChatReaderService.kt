@@ -14,7 +14,6 @@ import android.graphics.Path
 import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
 import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -81,18 +80,20 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         val sections: LinkedHashMap<String, OverlayCard.Section> = LinkedHashMap(),
     )
 
-    private val main = Handler(Looper.getMainLooper())
+    /** Everything posted here that throws is logged, not the end of the service (see [Crash]). */
+    private val main = Crash.mainHandler()
+    // Worker threads log what a task throws and carry on, where it used to end the process.
     /** Jev judgments, one at a time. */
-    private val judgeIo = Executors.newSingleThreadExecutor { Thread(it, "vibecheck-judge") }
+    private val judgeIo = Executors.newSingleThreadExecutor(Crash.threads("vibecheck-judge"))
     /** OpenRouter: deep reads, reply drafts, profiles. Seconds each, so never queued in front of a judgment. */
-    private val deepIo = Executors.newFixedThreadPool(2) { Thread(it, "vibecheck-deep") }
+    private val deepIo = Executors.newFixedThreadPool(2, Crash.threads("vibecheck-deep"))
     /** Writing a profile: one coordinator per person, and the notes on stretches of history three at a time. */
-    private val profileIo = Executors.newSingleThreadExecutor { Thread(it, "vibecheck-profile") }
-    private val notesIo = Executors.newFixedThreadPool(3) { Thread(it, "vibecheck-notes") }
+    private val profileIo = Executors.newSingleThreadExecutor(Crash.threads("vibecheck-profile"))
+    private val notesIo = Executors.newFixedThreadPool(3, Crash.threads("vibecheck-notes"))
     /** Learning about me: day write-ups and the profile of me, one at a time. */
-    private val meIo = Executors.newSingleThreadExecutor { Thread(it, "vibecheck-me") }
+    private val meIo = Executors.newSingleThreadExecutor(Crash.threads("vibecheck-me"))
     /** Screenshot callbacks: off the main thread (a debug route blocks on one) and never behind a network call. */
-    private val shotIo = Executors.newSingleThreadExecutor { Thread(it, "vibecheck-shot") }
+    private val shotIo = Executors.newSingleThreadExecutor(Crash.threads("vibecheck-shot"))
 
     private lateinit var prefs: Prefs
     private lateinit var card: OverlayCard
@@ -103,7 +104,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     /** The watched packages, re-read when the setting changes rather than split apart on every event. */
     private var watched: Set<String> = emptySet()
     /** SharedPreferences keeps listeners weakly, so this field is what keeps it alive. */
-    private val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key -> onPrefChanged(key) }
+    private val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key -> Crash.guard("prefs") { onPrefChanged(key) } }
 
     private var targetPkg = ""
     private var lastWindow = Chat.Box(0, 0, 0, 0)
@@ -138,6 +139,8 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     }
     /** "personId|key" of the judgment in flight. */
     private var inFlight: String? = null
+    /** When [inFlight] was asked: a judgment that never comes back must not hold up every later one. */
+    private var inFlightAt = 0L
     /** The judgment in flight is a re-judge of the card on screen, which stays up until it lands. */
     private var quietFor: String? = null
     /** Whose chat a history read left scrolled far up, and what it read there; see handle(). */
@@ -178,6 +181,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     private val scan = Runnable { scanNow() }
 
     override fun onServiceConnected() {
+        Crash.install(this)
         prefs = Prefs(this)
         prefs.lang   // applies the UI language to L
         people = PersonStore(this)
@@ -224,7 +228,9 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         }
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) = Crash.guard("event") { onEvent(event) }
+
+    private fun onEvent(event: AccessibilityEvent?) {
         val pkg = event?.packageName?.toString() ?: return
         if (event.eventType == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED) {
             if (pkg in watched) hear(pkg, event)
@@ -639,6 +645,13 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
 
         // Normally judge only when the other person spoke last. But if the user opened the card
         // themselves, judge the current screen whoever spoke last, or it hangs on "Thinking".
+        // A judgment whose answer never came back (its thread gave out) would hold up every later
+        // one, and the card would say "Thinking…" for good: after a few minutes it is let go.
+        if (inFlight != null && System.currentTimeMillis() - inFlightAt > STUCK_MS) {
+            Diag.log("judge: gave up waiting on $inFlight")
+            inFlight = null
+            quietFor = null
+        }
         val key = if (heldFor == id && !forceJudge) null
             else Chat.triggerKey(bubbles) ?: (if (forceJudge) Chat.anyKey(bubbles) else null)
         val known = verdicts[id]
@@ -713,6 +726,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     ) {
         val id = record.id
         inFlight = "$id|$key"
+        inFlightAt = System.currentTimeMillis()
         // Known (learned or set by hand): Jev is told, not asked, so one turn cannot contradict it.
         val rel = Relationship.pinned(record.rel)
         val close = Relationship.closeness(record.close)
@@ -754,7 +768,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             prefs.countUse(Prefs.USE_JUDGE)
             val triage = runCatching { Judge.ask(prefs, triageBody) }
             // Routed on the danger this person's history calibrates to, not the raw reading.
-            val routine = triage.map { Jev.isRoutine(calibrated(it, model)) }.getOrDefault(false)
+            val routine = triage.mapCatching { Jev.isRoutine(calibrated(it, model)) }.getOrDefault(false)
             // No situation answer at all still gets the default set, not a two-block card.
             val situation = rel ?: triage.getOrNull()?.let { (it["situation"] as? Jev.Answer.Dist)?.top } ?: ""
             val merged = triage.mapCatching { t ->
@@ -1172,29 +1186,9 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         val send = { image: String? ->
             val model = if (kind == REPLY || image != null) prefs.fastModel else prefs.deepModel
             deepIo.execute {
-                // More than the dozen lines a screen holds, when this chat's kept history lines up with them.
-                val lines = Archive.before(people.archive(c.own), c.transcript, CONTEXT_LINES)
-                // What I am like, what I have been up to, what I said elsewhere today.
-                val about = if (!prefs.aboutMe) null else listOfNotNull(
-                    Me.brief(me.profile, me.summaries(3)),
-                    Me.elsewhereToday(me.lines(Me.day(System.currentTimeMillis())), c.name)
-                        ?.let { L.t("我今天在别的聊天里说过：\n", "What I said in other chats today:\n") + it },
-                ).joinToString("\n").ifBlank { null }
-                var prompt = OpenRouter.deepPrompt(
-                    c.name, c.note, c.style, c.history, c.relation,
-                    lines, c.answers, c.viaOcr, image != null, c.situation, c.relationship, c.closeness, c.profile, about,
-                )
-                // Drafts in my voice: how I actually answered this person before, from the kept history.
-                if (kind == REPLY) {
-                    val history = people.archiveAll(v.personId)
-                    if (history.isNotEmpty()) {
-                        val said = c.transcript.takeLast(4).filter { it.first == "对方" }.takeLast(2).joinToString(" ") { it.second }
-                        prompt += OpenRouter.voice(
-                            Archive.examples(history, said, k = 8, exclude = lines.map { it.second }.toSet()),
-                            Archive.phrases(history, "我"),
-                        )
-                    }
-                }
+                // Whatever goes wrong, building the prompt included, ends up on the card as a
+                // failure: the panel must never be left saying "Thinking…".
+                val built = runCatching { deepPromptFor(kind, v, image != null) }
                 val started = System.currentTimeMillis()
                 // Each finished line goes on the card while the model writes the next.
                 val ask = { pic: String?, text: String ->
@@ -1202,8 +1196,8 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                         onLine = { line -> main.post { deepPartial(kind, tag, v, title, line) } })
                 }
                 // A model that reads no images (one typed in, or Qwen) gets the text alone.
-                val r = runCatching { ask(image, prompt) }.recoverCatching { e ->
-                    if (image != null && OpenRouter.noImages(e)) ask(null, prompt.replace(OpenRouter.SCREENSHOT_NOTE, "")) else throw e
+                val r = built.mapCatching { ask(image, it) }.recoverCatching { e ->
+                    if (image != null && OpenRouter.noImages(e)) ask(null, built.getOrThrow().replace(OpenRouter.SCREENSHOT_NOTE, "")) else throw e
                 }
                 r.onSuccess { Diag.log("deep($model) ok in ${System.currentTimeMillis() - started}ms") }
                     .onFailure { Diag.lastError = "deep: ${it.message}"; Diag.log(Diag.lastError) }
@@ -1213,8 +1207,43 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         // A picture of a different chat, or of this one scrolled back into its history after a read,
         // would contradict the transcript, so only while this chat's messages are on screen.
         if (c.viaOcr && activeId == v.personId && heldFor != v.personId) captureChat(hideOverlay = true) { shot, note ->
-            send(shot?.let { val s = toJpegBase64(it.bmp); it.bmp.recycle(); s }.also { if (it == null) Diag.log("deep: no image, $note") })
+            // A picture that cannot be made is left out, rather than the question never being sent.
+            val jpeg = shot?.let { runCatching { toJpegBase64(it.bmp) }.also { _ -> it.bmp.recycle() }.getOrNull() }
+            if (jpeg == null) Diag.log("deep: no image, $note")
+            send(jpeg)
         } else send(null)
+    }
+
+    /**
+     * The prompt for a deep read or drafts on [v]: the kept history before the screen, what I am
+     * like and have been doing, and for drafts how I really answer this person. Blocking.
+     */
+    private fun deepPromptFor(kind: String, v: Verdict, hasImage: Boolean): String {
+        val c = v.ctx
+        // More than the dozen lines a screen holds, when this chat's kept history lines up with them.
+        val lines = Archive.before(people.archive(c.own), c.transcript, CONTEXT_LINES)
+        // What I am like, what I have been up to, what I said elsewhere today.
+        val about = if (!prefs.aboutMe) null else listOfNotNull(
+            Me.brief(me.profile, me.summaries(3)),
+            Me.elsewhereToday(me.lines(Me.day(System.currentTimeMillis())), c.name)
+                ?.let { L.t("我今天在别的聊天里说过：\n", "What I said in other chats today:\n") + it },
+        ).joinToString("\n").ifBlank { null }
+        var prompt = OpenRouter.deepPrompt(
+            c.name, c.note, c.style, c.history, c.relation,
+            lines, c.answers, c.viaOcr, hasImage, c.situation, c.relationship, c.closeness, c.profile, about,
+        )
+        // Drafts in my voice: how I actually answered this person before, from the kept history.
+        if (kind == REPLY) {
+            val history = people.archiveAll(v.personId)
+            if (history.isNotEmpty()) {
+                val said = c.transcript.takeLast(4).filter { it.first == "对方" }.takeLast(2).joinToString(" ") { it.second }
+                prompt += OpenRouter.voice(
+                    Archive.examples(history, said, k = 8, exclude = lines.map { it.second }.toSet()),
+                    Archive.phrases(history, "我"),
+                )
+            }
+        }
+        return prompt
     }
 
     /**
@@ -1447,27 +1476,36 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         val model = prefs.deepModel
         writing += id
         awake()
+        // Picked up again by itself (readNow null): the card is not popped open for it, only
+        // for a read the user started.
         learnResult(id, title, listOf(
             if (readNow == null) L.t("接着写档案…", "Picking the profile up again…")
-            else L.t("读了 $readNow 条，开始写档案…", "Read $readNow messages, starting the profile…")))
+            else L.t("读了 $readNow 条，开始写档案…", "Read $readNow messages, starting the profile…")), open = readNow != null)
         profileIo.execute {
-            val history = people.archiveAll(id)
-            val chunks = Archive.chunks(history, CHUNK_CHARS)
-            val chars = history.sumOf { it.second.length }
-            val amount = if (L.en) (if (chars < 1000) "$chars characters" else "~${(chars + 500) / 1000}k characters")
-                else if (chars < 10_000) "$chars 字" else "约 ${"%.1f".format(chars / 10_000.0)} 万字"
-            val size = if (readNow == null) L.t("共存 ${history.size} 条（$amount）", "${history.size} messages kept ($amount)")
-                else L.t("读了 $readNow 条，共存 ${history.size} 条（$amount）", "Read $readNow, kept ${history.size} messages ($amount)")
-            val progress = { done: Int ->
-                main.post { learnResult(id, title, listOf(size, L.t("正在写档案：$done / ${chunks.size}", "Writing the profile: $done of ${chunks.size}"),
-                    L.t("写完之前屏幕会一直亮着", "The screen stays on until it is done")), open = false) }
-                Unit
+            // Everything, reading the kept history included, inside: a failure anywhere must end
+            // the write, or the person stays "still writing" and the screen stays on for good.
+            var size = ""
+            var total = 0
+            val r = runCatching {
+                val history = people.archiveAll(id)
+                total = history.size
+                val chunks = Archive.chunks(history, CHUNK_CHARS)
+                val chars = history.sumOf { it.second.length }
+                val amount = if (L.en) (if (chars < 1000) "$chars characters" else "~${(chars + 500) / 1000}k characters")
+                    else if (chars < 10_000) "$chars 字" else "约 ${"%.1f".format(chars / 10_000.0)} 万字"
+                size = if (readNow == null) L.t("共存 ${history.size} 条（$amount）", "${history.size} messages kept ($amount)")
+                    else L.t("读了 $readNow 条，共存 ${history.size} 条（$amount）", "Read $readNow, kept ${history.size} messages ($amount)")
+                val progress = { done: Int ->
+                    main.post { learnResult(id, title, listOf(size, L.t("正在写档案：$done / ${chunks.size}", "Writing the profile: $done of ${chunks.size}"),
+                        L.t("写完之前屏幕会一直亮着", "The screen stays on until it is done")), open = false) }
+                    Unit
+                }
+                profileFrom(id, name, history, chunks, key, model, progress)
             }
-            val r = runCatching { profileFrom(id, name, history, chunks, key, model, progress) }
             main.post {
                 writing -= id
                 awake()
-                r.onSuccess { (text, skipped) -> resumes.remove(id); profileDone(id, history.size, text, skipped) }
+                r.onSuccess { (text, skipped) -> resumes.remove(id); profileDone(id, total, text, skipped, open = readNow != null) }
                     .onFailure {
                         Diag.log("learn: profile failed ${it.message}")
                         // A lost connection mends itself: picked up again once back in this chat,
@@ -1478,9 +1516,10 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                             resumeAt = System.currentTimeMillis() + PROFILE_RESUME_MS
                             if (activeId == id) rescanSoon(PROFILE_RESUME_MS + 100)
                         } else resumes.remove(id)
-                        learnResult(id, title, listOf(size, L.t("档案没写成：", "The profile failed: ") + Judge.describe(it),
+                        learnResult(id, title, listOfNotNull(size.ifBlank { null }, L.t("档案没写成：", "The profile failed: ") + Judge.describe(it),
                             if (again) L.t("读到的和写好的部分都存下了，回到这个聊天会自动接着写", "Everything read and written so far is kept; it carries on by itself when you are back in this chat")
-                            else L.t("读到的都存下了，再点「学习」只会补写没写完的部分", "Everything read is kept; Learn again only redoes what is missing")))
+                            else L.t("读到的都存下了，再点「学习」只会补写没写完的部分", "Everything read is kept; Learn again only redoes what is missing")),
+                            open = readNow != null)
                     }
             }
         }
@@ -1570,7 +1609,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         return ask(Profile.profileSystem(true), Profile.profilePrompt(name, history, body, true), 5000) to notes.count { it == null }
     }
 
-    private fun profileDone(id: String, total: Int, text: String, skipped: Int) {
+    private fun profileDone(id: String, total: Int, text: String, skipped: Int, open: Boolean = true) {
         // Saved onto a fresh copy: a scan during the calls may have moved the counts on.
         val rec = people.loadId(id)
         val p = Relationship.parse(text.trim())
@@ -1587,7 +1626,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                 people.relationLine(rec),
                 overruled?.let { L.t("（档案看像「${L.label(it)}」，没改你设定的）", "(the profile reads as ${L.label(it)}; your choice was kept)") },
                 skipped.takeIf { it > 0 }?.let { L.t("（有 $it 段没整理成，再点「学习」补上）", "($it stretches failed; Learn again to fill them in)") },
-            ) + p.profile.lines().map { it.trim() }.filter { it.isNotEmpty() })
+            ) + p.profile.lines().map { it.trim() }.filter { it.isNotEmpty() }, open)
         // The card on screen was judged without this profile: the next scan sees that and judges again.
         if (activeId == id) rescanSoon()
         // A history read about someone says things about me too.
@@ -1830,6 +1869,8 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         val top = (y0 + box[1] - pad).coerceAtLeast(0)
         val right = (x0 + box[2] + pad).coerceAtMost(bmp.width - 1)
         val bottom = (y0 + box[3] + pad).coerceAtMost(bmp.height - 1)
+        // Not the shape of a name (a long thin strip): no picture is better than a wrong one.
+        if (!Person.plausiblePicture(right - left + 1, bottom - top + 1)) return@runCatching null
         val cut = Bitmap.createBitmap(bmp, left, top, right - left + 1, bottom - top + 1)
         if (cut.height <= 64) cut
         else Bitmap.createScaledBitmap(cut, cut.width * 64 / cut.height, 64, true).also { if (it !== cut) cut.recycle() }
@@ -2095,6 +2136,8 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         private const val FATAL_BACKOFF_MS = 10 * 60 * 1000L
         /** The record every chat whose name cannot be read at all shares. Stored as is, shown translated. */
         private const val UNKNOWN = "未知"
+        /** Longer than a judgment's two calls with their retries ever take. */
+        private const val STUCK_MS = 180_000L
 
         private const val DEEP = "deep"
         private const val REPLY = "reply"

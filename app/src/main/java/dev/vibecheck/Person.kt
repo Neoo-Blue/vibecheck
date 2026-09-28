@@ -154,43 +154,89 @@ object Person {
 
     /**
      * Where the name sits in a strip of the title bar (pixels, row by row), as left, top, right,
-     * bottom within the strip: the densest band of rows that stand out from the bar's own colour,
-     * and the columns they cover. For a name OCR cannot read, this picture is how it is shown.
-     * Null when nothing stands out.
+     * bottom within the strip: the shape drawn across the middle of the bar, with whatever touches
+     * it. For a name OCR cannot read, this picture is how it is shown. Null when nothing stands
+     * out there.
+     *
+     * Only a shape reaching into the middle counts, and not one that runs off the strip's top or
+     * bottom edge: the strip reaches a little past the bar, and a photo right under the title bar
+     * once filled more of it than the emoji name did. A thin strip of that photo was cut out as
+     * the name, and the card's title read "…".
      */
     fun nameBox(px: IntArray, w: Int, h: Int): IntArray? {
         if (w < 8 || h < 8 || px.size < w * h) return null
         fun far(a: Int, b: Int) = kotlin.math.abs((a shr 16 and 0xFF) - (b shr 16 and 0xFF)) +
             kotlin.math.abs((a shr 8 and 0xFF) - (b shr 8 and 0xFF)) + kotlin.math.abs((a and 0xFF) - (b and 0xFF)) > 90
-        val hits = IntArray(h) { y -> val bg = px[y * w]; (0 until w).count { far(px[y * w + it], bg) } }
-        var best: IntRange? = null
-        var bestSum = 0
-        var start = -1
-        var sum = 0
-        var gap = 0
-        for (y in 0..h) {
-            if (y < h && hits[y] >= 2) {
-                if (start < 0) start = y
-                sum += hits[y]
-                gap = 0
-            } else if (start >= 0) {
-                gap++
-                if (gap > 3 || y == h) {
-                    if (sum > bestSum) { bestSum = sum; best = start..(y - gap) }
-                    start = -1; sum = 0; gap = 0
+        // Each row against its own commonest colour, the bar's, whatever else crosses the row.
+        val ink = BooleanArray(w * h)
+        val counts = HashMap<Int, Int>()
+        for (y in 0 until h) {
+            counts.clear()
+            for (x in 0 until w step 2) counts.merge(px[y * w + x] and 0xF8F8F8, 1, Int::plus)
+            val common = counts.maxByOrNull { it.value }!!.key
+            val bg = px[y * w + (0 until w).first { (px[y * w + it] and 0xF8F8F8) == common }]
+            for (x in 0 until w) if (far(px[y * w + x], bg)) ink[y * w + x] = true
+        }
+        // The shapes reaching into the middle fifth, each grown across gaps of a pixel or two
+        // (between the strokes of a glyph, or two emoji side by side).
+        val seen = BooleanArray(w * h)
+        val stack = IntArray(w * h)
+        var best: IntArray? = null
+        var bestSize = 0
+        for (y in 0 until h) for (x in w * 2 / 5 until w * 3 / 5) {
+            val start = y * w + x
+            if (!ink[start] || seen[start]) continue
+            val box = intArrayOf(x, y, x, y)
+            var size = 0
+            var top = 0
+            stack[top++] = start
+            seen[start] = true
+            while (top > 0) {
+                val i = stack[--top]
+                size++
+                val ix = i % w
+                val iy = i / w
+                box[0] = minOf(box[0], ix); box[1] = minOf(box[1], iy)
+                box[2] = maxOf(box[2], ix); box[3] = maxOf(box[3], iy)
+                for (ny in maxOf(0, iy - REACH)..minOf(h - 1, iy + REACH)) {
+                    for (nx in maxOf(0, ix - REACH)..minOf(w - 1, ix + REACH)) {
+                        val j = ny * w + nx
+                        if (ink[j] && !seen[j]) { seen[j] = true; stack[top++] = j }
+                    }
                 }
             }
+            // Cut off by the strip's edge: it comes from under the bar (or the status bar above it).
+            if (box[1] == 0 || box[3] == h - 1) continue
+            if (size > bestSize) { bestSize = size; best = box }
         }
-        val rows = best ?: return null
-        if (rows.last - rows.first + 1 < 6) return null
-        var left = w
-        var right = -1
-        for (y in rows) {
-            val bg = px[y * w]
-            for (x in 0 until w) if (far(px[y * w + x], bg)) { left = minOf(left, x); right = maxOf(right, x) }
-        }
-        if (right - left + 1 < 6) return null
-        return intArrayOf(left, rows.first, right, rows.last)
+        val b = best ?: return null
+        if (b[3] - b[1] + 1 < 6 || b[2] - b[0] + 1 < 6) return null
+        return b
+    }
+
+    /** Gaps a shape is grown across, in pixels. */
+    private const val REACH = 2
+
+    /**
+     * Could this be a picture of a name: at least [MIN_PICTURE_H] pixels tall and not far wider
+     * than a few emoji. A kept picture that is not (a strip cut from under the title bar) is
+     * thrown away, and the next clear looks take a new one.
+     */
+    fun plausiblePicture(w: Int, h: Int): Boolean = h >= MIN_PICTURE_H && w >= 6 && w <= h * 6
+
+    private const val MIN_PICTURE_H = 12
+
+    /** At most this many times as wide as it is tall when a name picture is drawn. */
+    const val PICTURE_MAX_RATIO = 4
+
+    /**
+     * The size to draw a name picture of [w]x[h] in a line [height] pixels tall: that tall, or
+     * shrunk so it is no wider than [PICTURE_MAX_RATIO] heights. A wide one took the whole title.
+     */
+    fun pictureSize(w: Int, h: Int, height: Int): Pair<Int, Int> {
+        val width = height * w / h.coerceAtLeast(1)
+        val max = height * PICTURE_MAX_RATIO
+        return if (width <= max) width to height else max to (max * h / w.coerceAtLeast(1)).coerceAtLeast(1)
     }
 
     // ---- keeping the right picture of a name ----
