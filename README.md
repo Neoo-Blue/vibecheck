@@ -134,7 +134,8 @@ can score opposite ways in different situations, and nothing is shared between p
 ## The card
 
 **At rest there is only the bubble.** Judging still runs on every new message; several sent in a
-row are judged once, when they stop. The result shows
+row are judged once, when they stop. Scrolling up to read older messages is not a new turn: the
+card keeps the reading of the newest one. The result shows
 on the bubble as the danger number and a colour (green → yellow → red). Tap to open, ✕ to
 collapse. **Drag** the bubble to move it (it snaps to the nearest edge and remembers the spot);
 **long-press** it for the menu. The card is a trusted window, so tapping it does not block the
@@ -215,8 +216,9 @@ What it accumulates (all local; raw text is never uploaded for this):
 | share of high-risk turns | among turns actually judged |
 | days seen | distinct dates |
 
-These enter every judgment as "long-term observations of this relationship" and the deep
-prompt too. Each message is counted once: every screen is lined up against the newest messages
+These enter the deep prompt as "long-term observations of this relationship". The judge gets
+who opens, how fast I reply, the high-risk share and the days seen, not the counts and lengths,
+which change with every message and tell one turn nothing more. Each message is counted once: every screen is lined up against the newest messages
 already counted for that person (tolerating the odd OCR misread), so sitting on the same screen,
 or scrolling up through history and back down, does not inflate the numbers. Timing (who opened,
 how long I took) is only taken from messages that arrived while the chat was being watched.
@@ -244,12 +246,12 @@ are fine where the app gives text. OCR (WeChat, Telegram) cannot see emoji at al
 
 | stored | from | used as |
 |---|---|---|
-| who they are to you | learned from the history, or chosen on the card (⋯ → Relationship) or on their People page | `我和对方的关系` in the state; the situation question is then not asked |
+| who they are to you | learned from the history, or chosen on the card (⋯ → Relationship) or on their People page | `我和对方的关系` in the state; the situation question is then not asked. Not known, but answered the same five turns running: not asked either, except every twelfth turn |
 | how close you are | the same, as its own choice: distant, casual, familiar, close, very close | `我们有多亲近` in the state, and on the card title |
 | a name you gave them | ⋯ → Rename, or their People page | shown everywhere, and the name the models are given |
 | personal note | typed by you in settings | `relationship context`, together with the profile; both replace the general context |
-| how I talk to them | statistics over my own messages | `my usual way of speaking` in the state |
-| last 8 turns | one `intent / danger / action` line per judgment | `where the last few turns went` in the state |
+| how I talk to them | statistics over my own messages | the deep prompt and drafts (the judge reads their turn) |
+| last 8 turns | one `intent / danger / action` line per judgment | the last 3 as `where the last few turns went` in the state |
 | this person's bandit | see Learning | calibrates danger, re-ranks the best move |
 | kept history | the whole chat, from "learn this person", topped up live with new messages | what the profile is written from; reply drafts pick real past exchanges from it |
 | profile | sections written by DeepSeek from the whole kept history | the full text for deep reads and drafts; a short brief as `relationship context`; one matching line on the card |

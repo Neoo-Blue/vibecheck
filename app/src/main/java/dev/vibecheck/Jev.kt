@@ -175,26 +175,27 @@ object Jev {
         /** How a turn with them usually reads (Person.normSummary). */
         usual: String? = null,
     ): String {
-        val msgs = transcript.joinToString(",") { (who, text) ->
-            """{"谁":${q(who)},"内容":${q(text)}}"""
-        }
+        // One string per message, "对方：…": a {"谁":…,"内容":…} object around every line cost
+        // more than most of the lines themselves.
+        val msgs = transcript.joinToString(",") { (who, text) -> q("$who：$text") }
+        // What stays the same from one turn to the next first, then what changes with every
+        // message: a provider that keeps the start of a request it has just seen charges less for it.
         val parts = ArrayList<String>()
         peer?.takeIf { it.isNotBlank() }?.let { parts.add(""""对方":${q(it)}""") }
         relationship?.takeIf { it.isNotBlank() }?.let { parts.add(""""我和对方的关系":${q(it)}""") }
         closeness?.takeIf { it.isNotBlank() }?.let { parts.add(""""我们有多亲近":${q(it)}""") }
         context.takeIf { it.isNotBlank() }?.let { parts.add(""""关系背景":${q(it)}""") }
+        // The model should know the transcript has holes, rather than read silence as meaning.
+        source?.takeIf { it.isNotBlank() }?.let { parts.add(""""转写说明":${q(it)}""") }
         style?.takeIf { it.isNotBlank() }?.let { parts.add(""""我平时的说话方式":${q(it)}""") }
         // What is normal for this person, learned turn by turn: read this turn against it, so a
         // short answer from someone who always writes short is not cold, nor a joke an attack.
         theirStyle?.takeIf { it.isNotBlank() }?.let { parts.add(""""对方平时的说话方式":${q(it)}""") }
+        relation?.takeIf { it.isNotBlank() }?.let { parts.add(""""这段关系的长期观察":${q(it)}""") }
         usual?.takeIf { it.isNotBlank() }?.let { parts.add(""""对方平时的状态":${q(it + L.t("（仅供参考，这一轮以对话本身为准）", " (for reference; this turn is judged on the conversation itself)"))}""") }
         history?.takeIf { it.isNotBlank() }?.let { parts.add(""""我们最近几轮的走向":${q(it)}""") }
-        relation?.takeIf { it.isNotBlank() }?.let { parts.add(""""这段关系的长期观察":${q(it)}""") }
-        // The model should know the transcript has holes, rather than read silence as meaning.
-        source?.takeIf { it.isNotBlank() }?.let { parts.add(""""转写说明":${q(it)}""") }
         parts.add(""""对话":[$msgs]""")
-        val state = "{${parts.joinToString(",")}}"
-        return state
+        return "{${parts.joinToString(",")}}"
     }
 
     /** Back-compat: the triage call. */
