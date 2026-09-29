@@ -403,6 +403,9 @@ with what is actually on screen.
   use. Phones without Play services (many phones sold in China) cannot run the OCR path; the error
   shows under Tools → Diagnostics. On Android 14+ the capture is of the chat's own window, so an
   open card or the keyboard never hides messages from OCR.
+- OCR now and then reads a character as a look-alike (「好啊」 as 「好响」). Every model that reads
+  text from the screen is told so: it reads such a word by what the chat means, and writes what
+  was meant in drafts and quotes.
 - Whose message is whose comes from where it sits: hugging the left is them, hugging the right
   is me. A long message that nearly fills the width sits the same either way (WeChat's widest
   bubbles leave equal margins), so for those the avatar or bubble drawn beside the text decides:

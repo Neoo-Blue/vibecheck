@@ -47,7 +47,7 @@ object Profile {
             "【Ta 喜欢】吃的、玩的、爱好、在追的东西\n【Ta 不喜欢】\n【常聊的事】\n" +
             "【我们的梗】只有我们懂的说法和笑点\n【重要的事】发生过的事、计划、约定，带上大概的时间\n" +
             "【雷区】会让 Ta 不高兴的话题或说法\n【Ta 难过时】什么话有用、什么没用\n" +
-            "总共不超过 600 字。",
+            MISREAD_ZH + "总共不超过 600 字。",
         "You are reading a stretch of a chat between \"me\" and \"them\" (oldest first). Note what it shows that will " +
             "help me talk to them later. Only what is in it; invent nothing, no filler. Use these headings, one to three " +
             "short lines under each; leave out any heading this stretch says nothing about:\n" +
@@ -58,12 +58,20 @@ object Profile {
             "[They like] food, activities, hobbies, what they're into\n[They dislike]\n[What we talk about]\n" +
             "[Our running jokes] things only we get\n[Things that happened] events, plans, promises, with rough dates\n" +
             "[Sore spots] topics or phrasing that upset them\n[When they're down] what helps and what doesn't\n" +
-            "At most 300 words.")
+            MISREAD_EN + "At most 300 words.")
+
+    /**
+     * Histories read off the screen by OCR carry the odd character read as a look-alike, which a
+     * note or profile quoting "their words" would pass on to every draft written from it.
+     */
+    const val MISREAD_ZH = "有的记录是从屏幕上识别出来的，个别字可能被认成了形近字：读不通的按原意理解，引用原话时写原本的字。"
+    const val MISREAD_EN = "Some of it was read off the screen, so a character may have been misread as a look-alike: read what " +
+        "makes no sense as what was meant, and quote words as they were meant. "
 
     /** Step two, or the only step for a short history: the profile itself. */
     fun profileSystem(fromNotes: Boolean): String = L.t(
         (if (fromNotes) "下面是从我和「对方」的全部聊天记录里分段整理出的笔记（从旧到新）。" else "下面是我和「对方」的聊天记录（从旧到新）。") +
-            "写一份关于 Ta 的完整档案，给我以后聊天用。只写材料里有的，不编；重复的合并；前后矛盾的以较新的为准。\n" +
+            "写一份关于 Ta 的完整档案，给我以后聊天用。只写材料里有的，不编；重复的合并；前后矛盾的以较新的为准。" + MISREAD_ZH + "\n" +
             "第一行固定写「关系：」，后面只写下面其中一个词：${Relationship.optionList()}。看的是 Ta 和我之间的关系，不是聊天的话题：朋友之间聊各自的感情，仍然是朋友。\n" +
             "第二行固定写「亲近：」，后面只写下面其中一个词：${Relationship.closenessList()}。关系好、聊得亲密，不等于是恋人。\n" +
             "然后按这些小标题分段，小标题单独占一行，下面一到四行，每行以「•」开头；没有内容的段不写：${headings()}\n" +
@@ -72,7 +80,7 @@ object Profile {
         (if (fromNotes) "Below are notes taken, stretch by stretch, from my whole chat history with \"them\" (oldest first). "
             else "Below is my chat history with \"them\" (oldest first). ") +
             "Write a full profile of them for me to use in later chats. Only what the material shows; invent nothing; " +
-            "merge repeats; where it contradicts itself, the newer wins.\n" +
+            "merge repeats; where it contradicts itself, the newer wins. " + MISREAD_EN.trimEnd() + "\n" +
             "The first line is \"Relationship: \" followed by exactly one of: ${Relationship.optionList()}. That is what they " +
             "are to me, not what we talk about: friends discussing their love lives are still friends.\n" +
             "The second line is \"Closeness: \" followed by exactly one of: ${Relationship.closenessList()}. Being close " +

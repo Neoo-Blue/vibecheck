@@ -106,12 +106,13 @@ object Me {
     val DAY_SYSTEM: String get() = L.t(
         "下面是我某一天在各个聊天里的消息（按聊天分组，按时间排）。写这一天的小结，给我以后回顾，也给替我写回复时参考：" +
             "我做了什么、去了哪、和谁聊了什么、定了什么计划或约定、心情怎么样。只写记录里有的，不编；称我为「我」，别人用名字。" +
+            Profile.MISREAD_ZH +
             "三到五行，每行以「•」开头，总共不超过 150 字。没什么内容就只写一行「• 没聊什么」。",
         "Below are my messages from one day across my chats (grouped by chat, in time order). Write the day up, for me " +
             "to look back on and for drafting replies in my name: what I did, where I went, who I talked with about what, " +
             "plans or promises made, how I felt. Only what the messages show; invent nothing; call me \"I\" and others by " +
-            "name. Three to five lines, each starting with \"•\", at most 80 words. If there is little, write only " +
-            "\"• Not much\".")
+            "name. " + Profile.MISREAD_EN + "Three to five lines, each starting with \"•\", at most 80 words. If there " +
+            "is little, write only \"• Not much\".")
 
     val NOTES_SYSTEM: String get() = L.t(
         "你在读「我」和一个人的一段聊天记录（从旧到新）。只记关于「我」的事，给我的个人档案用。按下面的小标题写，" +
@@ -121,7 +122,7 @@ object Me {
             "【我喜欢】爱好、吃的、玩的、在追的东西\n【我不喜欢】\n" +
             "【我最近在忙】工作、学习、计划、约定，带上大概的时间\n" +
             "【我在意的事】让我开心、烦心、担心的事\n" +
-            "只写记录里有的，不编；对方的事不写，除非和我有关。总共不超过 500 字。",
+            "只写记录里有的，不编；对方的事不写，除非和我有关。" + Profile.MISREAD_ZH + "总共不超过 500 字。",
         "You are reading a stretch of a chat between \"me\" and one person (oldest first). Note only what it shows " +
             "about ME, for my own profile. Use these headings, one to three short lines each; leave out any heading " +
             "this stretch says nothing about:\n" +
@@ -130,7 +131,7 @@ object Me {
             "[What I like] hobbies, food, activities, what I'm into\n[What I dislike]\n" +
             "[What I'm busy with] work, study, plans, promises, with rough dates\n" +
             "[What I care about] what makes me happy, annoyed or worried\n" +
-            "Only what is in it; invent nothing; nothing about them unless it concerns me. At most 250 words.")
+            "Only what is in it; invent nothing; nothing about them unless it concerns me. " + Profile.MISREAD_EN + "At most 250 words.")
 
     val MERGE_SYSTEM: String get() = L.t(
         "下面是关于「我」的几份笔记。合并成一份，用同样的小标题；重复的合并，矛盾的以较新的为准，只写笔记里有的。总共不超过 900 字。",

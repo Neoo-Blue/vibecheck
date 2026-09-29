@@ -49,8 +49,11 @@ object Person {
         symbols: Boolean = false,
     ): String? {
         val center = (win.left + win.right) / 2
-        val title = titles
-            .filter { looksLikeName(it.first) }
+        val names = titles.filter { looksLikeName(it.first) }
+        // A line under the name, over the same place (Telegram's "recording audio…", Instagram's
+        // username), is about them: the name is the one on top.
+        val title = names
+            .filterNot { (_, b) -> names.any { (_, o) -> o !== b && o.bottom <= b.top + 4 && o.left < b.right && b.left < o.right } }
             .minByOrNull { kotlin.math.abs(it.second.centerX - center) }
         if (title != null) return title.first.trim()
         avatarDescs.asSequence()
