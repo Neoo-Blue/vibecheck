@@ -33,7 +33,7 @@ class PersonTest {
         val items = listOf(
             "1:16" to Chat.Box(60, 40, 200, 100),          // status bar
             "Mia" to Chat.Box(610, 140, 830, 210),     // title bar
-            "扮猪吃老虎吗？" to Chat.Box(150, 900, 620, 990),
+            "周末有空吗？" to Chat.Box(150, 900, 620, 990),
             "好的" to Chat.Box(1000, 1050, 1300, 1140),
         )
         val (_, titles) = Chat.fromOcr(items, win, emptyList())
@@ -176,14 +176,14 @@ class IdentityTest {
         val ime = box(0, 2026, 1440, 3162)
         val items = listOf(
             "Mia" to box(610, 140, 830, 210),
-            "半只脚踏在鬼门关了" to box(150, 900, 620, 990),
+            "今天累得不想动了" to box(150, 900, 620, 990),
             "很冷" to box(1000, 1050, 1300, 1140),
             "o'wE' R TY Ư' I'o RT YU" to box(20, 2100, 1400, 2200),
             "A S D" to box(60, 2300, 900, 2400),
             "?123" to box(40, 2900, 300, 3000),
         )
         val (bubbles, _) = Chat.fromOcr(items, win, listOf(ime))
-        assertEquals(listOf("半只脚踏在鬼门关了", "很冷"), bubbles.map { it.text })
+        assertEquals(listOf("今天累得不想动了", "很冷"), bubbles.map { it.text })
         assertTrue(Chat.inConversation(bubbles))
     }
 }

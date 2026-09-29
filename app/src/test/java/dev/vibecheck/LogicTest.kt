@@ -120,14 +120,14 @@ class LogicTest {
         val card = box(100, 1300, 850, 1700)          // where our own overlay is sitting
         val items = listOf(
             "Mia" to box(610, 110, 830, 200),      // title bar
-            "扮猪吃老虎吗？" to box(150, 900, 620, 990),   // theirs
-            "我喜欢欲擒故纵" to box(800, 1050, 1300, 1140), // mine
+            "周末有空吗？" to box(150, 900, 620, 990),   // theirs
+            "我想去看个展" to box(800, 1050, 1300, 1140), // mine
             "Jev： 当前真实意图" to box(120, 1330, 800, 1420), // our card, must not come back in
-            "让我主动" to box(150, 1900, 420, 1990),      // theirs, newest
+            "你来定吧" to box(150, 1900, 420, 1990),      // theirs, newest
         )
         val (bubbles, titles) = Chat.fromOcr(items, WIN, listOf(card))
 
-        assertEquals(listOf("扮猪吃老虎吗？", "我喜欢欲擒故纵", "让我主动"), bubbles.map { it.text })
+        assertEquals(listOf("周末有空吗？", "我想去看个展", "你来定吧"), bubbles.map { it.text })
         assertEquals(listOf(true, false, true), bubbles.map { it.incoming })
         assertEquals("Mia", titles.single().first)
         assertEquals("Mia", Person.peerName(titles, emptyList(), WIN))
@@ -155,8 +155,8 @@ class LogicTest {
 
         // A real conversation has at least one message of mine.
         val chat = listOf(
-            Chat.Bubble("扮猪吃老虎吗？", true, box(150, 900, 620, 990)),
-            Chat.Bubble("我喜欢欲擒故纵", false, box(800, 1050, 1300, 1140)),
+            Chat.Bubble("周末有空吗？", true, box(150, 900, 620, 990)),
+            Chat.Bubble("我想去看个展", false, box(800, 1050, 1300, 1140)),
         )
         assertTrue(Chat.inConversation(chat))
     }
@@ -271,7 +271,7 @@ class HomeScreenTest {
 
         val chat = listOf(
             "Mia" to box(610, 140, 830, 210),
-            "半只脚踏在鬼门关了" to box(150, 900, 620, 990),
+            "今天累得不想动了" to box(150, 900, 620, 990),
             "很冷" to box(1000, 1050, 1300, 1140),
         )
         assertFalse(Chat.looksLikeHomeScreen(chat, win))

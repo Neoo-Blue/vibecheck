@@ -235,7 +235,7 @@ are fine where the app gives text. OCR (WeChat, Telegram) cannot see emoji at al
   title bar, on the card and on the People tab, never an internal code.
 - Their real name, emoji and all, is picked up from their message notifications: once a
   notification's message is on screen in that chat, its sender's name becomes theirs. The same
-  puts the emoji back on names OCR read only in part ("欧欧" becomes "欧欧🌸").
+  puts the emoji back on names OCR read only in part ("李四" becomes "李四🌸").
 - ⋯ → Rename on the card names anyone by hand (type or paste emoji); your name always wins.
 - A "typing…" indicator in place of the name is not taken for one.
 - Labels apps put on anyone ("Souler" on every Soul avatar, 对方, 用户) are never a name; a name made

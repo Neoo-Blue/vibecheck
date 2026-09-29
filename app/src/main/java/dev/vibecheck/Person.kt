@@ -10,8 +10,19 @@ object Person {
 
     // ---- identity ----
 
-    // App-level titles and tab labels: these are screens, not people.
-    private val TITLE_JUNK = setOf(
+    /**
+     * Screens inside the apps with a title where a chat has its name: WeChat's own pages and the
+     * photo picker. Such a screen is not a chat, and its title was once kept as a person
+     * ("Moments", 「相机胶卷」). Only titles no chat could have: a nickname can be almost anything.
+     */
+    private val SCREENS = setOf(
+        "Moments", "朋友圈", "Official Account", "Official Accounts", "公众号", "服务号", "订阅号消息",
+        "Service Accounts", "Channels", "视频号", "Top Stories", "看一看", "Mini Programs", "小程序",
+        "相机胶卷", "Camera Roll", "所有照片", "最近项目", "图片和视频", "All photos",
+    )
+
+    // App-level titles, tab labels and buttons in a chat's title bar: these are not people.
+    private val TITLE_JUNK = SCREENS + setOf(
         "返回", "取消", "更多", "聊天信息", "微信", "通讯录", "发现", "我",
         "WeChat", "Chats", "Contacts", "Discover", "Me", "Soul", "消息", "搜索", "Search",
         "Messenger", "Messages", "WhatsApp", "Telegram", "Instagram", "LINE", "Signal", "Discord",
@@ -21,14 +32,42 @@ object Person {
         // filed every Soul chat under one person.
         "Souler", "Soulmate", "匿名", "匿名用户", "神秘人", "用户", "对方", "好友", "联系人", "未知",
         "Unknown", "User", "TA", "Ta", "ta",
+        // Soul's follow button beside a name made of marks, which it outranked as a name.
+        "关注", "已关注", "+关注", "互相关注", "Follow", "Following",
+        // A clock's timer, read as a chat by versions up to 6.8.9 (see Apps.inFront).
+        "Timer", "计时器", "Stopwatch", "秒表",
     )
 
-    /** The presence line under a name in a chat header: WhatsApp, Telegram, Messenger, Instagram. */
+    /**
+     * The presence line under a name in a chat header (WhatsApp, Telegram, Messenger, Instagram),
+     * and when someone was last there: 「1分钟前」 beside a Soul name was once kept as a person.
+     */
     private val SUBTITLE = Regex(
         """(Active .*|Online|last seen.*|typing.*|\d+ (members|participants|subscribers|online).*|""" +
-            """tap here for contact info|在线|(对方)?正在(输入|讲话|说话).*|最后上线.*|\d+ ?位?成员)""",
+            """tap here for contact info|just now|yesterday|\d+\s*(s|sec|secs|seconds?|m|min|mins|minutes?|h|hr|hrs|hours?|d|days?|w|weeks?)\s+ago|""" +
+            """在线|(对方)?正在(输入|讲话|说话).*|最后上线.*|\d+ ?位?成员|刚刚(在线|来过|活跃)|当前在线|近期互动|""" +
+            """\d+\s*(秒|分钟|小时|天|周|个月)前(在线|来过|活跃)?|(今天|昨天|前天)(在线|来过|活跃)|最近在线)""",
         RegexOption.IGNORE_CASE,
     )
+
+    /** A title as it is compared with the lists above: without a count or an arrow after it ("Timer (5 m)", 「相机胶卷 ▾」). */
+    private fun bare(s: String): String =
+        s.trim().replace(TRAILING_COUNT, "").trimEnd { it.isWhitespace() || it in DECORATIONS }
+
+    private val TRAILING_COUNT = Regex("""\s*[(（][^()（）]{0,12}[)）]$""")
+    private const val DECORATIONS = "….·⌄∨▼▾˅›>〉»↓"
+
+    /** A title that is a screen of the app rather than someone's chat (see [SCREENS]). */
+    fun notAChat(titles: List<Pair<String, Chat.Box>>): Boolean = titles.any { bare(it.first) in SCREENS }
+
+    /**
+     * A name kept by an older version that was never anyone's: a screen's title, a button, a time
+     * or a presence line from the title bar.
+     */
+    fun isLabel(name: String): Boolean {
+        val s = name.trim()
+        return bare(s) in TITLE_JUNK || SUBTITLE.matches(s) || TYPING.matches(s)
+    }
 
     /** What WeChat and others put where the name was while the other person types. */
     private val TYPING = Regex("""((对方)?正在(输入|讲话|说话)|.*typing).*""", RegexOption.IGNORE_CASE)
@@ -75,7 +114,7 @@ object Person {
      */
     fun looksLikeSymbolName(raw: String): Boolean {
         val s = raw.trim()
-        if (s.isEmpty() || s in TITLE_JUNK || SUBTITLE.matches(s) || TYPING.matches(s)) return false
+        if (s.isEmpty() || isLabel(s)) return false
         val cps = s.filterNot { it.isWhitespace() }.codePoints().toArray()
         return cps.size in 1..12 && cps.none { Character.isDigit(it) }
     }
@@ -86,7 +125,7 @@ object Person {
      */
     fun looksLikeName(raw: String): Boolean {
         val s = raw.trim()
-        if (s.isEmpty() || s.length > 64 || s in TITLE_JUNK || SUBTITLE.matches(s)) return false
+        if (s.isEmpty() || s.length > 64 || bare(s) in TITLE_JUNK || SUBTITLE.matches(s)) return false
         // Counted in code points: one emoji is two chars, a family emoji eleven.
         val cps = s.filterNot { it.isWhitespace() }.codePoints().toArray()
         if (cps.isEmpty() || cps.size > 24) return false
@@ -100,6 +139,25 @@ object Person {
         return pictographs >= 1 && letters + pictographs + joiners >= cps.size
     }
 
+    /**
+     * A name of one letter ("J", 「雪」), which [looksLikeName] leaves out: OCR reads a stray mark
+     * or an emoji as a letter just as easily. The one letter centred in the title bar, which the
+     * caller takes for the name only when the picture of the title has no colour, as words have
+     * none. Such a chat went as one whose name is an emoji, and showed as 「未命名联系人」.
+     */
+    fun oneLetterName(titles: List<Pair<String, Chat.Box>>, win: Chat.Box): String? {
+        val center = (win.left + win.right) / 2
+        return titles.map { it.first.trim() to it.second }
+            .filter { (t, b) ->
+                t.codePointCount(0, t.length) == 1 && Character.isLetter(t.codePointAt(0)) && !isLabel(t) &&
+                    kotlin.math.abs(b.centerX - center) <= win.width * ONE_LETTER_CENTRED
+            }
+            .singleOrNull()?.first
+    }
+
+    /** How far from the middle of the window a one-letter name can sit, as a share of its width. */
+    private const val ONE_LETTER_CENTRED = 0.05
+
     /** An emoji or an emoji-like symbol (❤, ☆, ✨), not counting the parts that travel with one. */
     private fun isPictograph(cp: Int): Boolean =
         !isEmojiPart(cp) && (isEmoji(cp) || Character.getType(cp) == Character.OTHER_SYMBOL.toInt())
@@ -107,7 +165,7 @@ object Person {
     /** A name with emoji in it: the part OCR cannot read. */
     fun hasPictograph(s: String): Boolean = s.codePoints().anyMatch { isPictograph(it) }
 
-    /** The text without its emoji: what OCR reads of a name like "欧欧🌸". */
+    /** The text without its emoji: what OCR reads of a name like "李四🌸". */
     fun stripEmoji(s: String): String = buildString {
         s.codePoints().forEach { if (!isPictograph(it) && !isEmojiPart(it)) appendCodePoint(it) }
     }.trim()
@@ -117,7 +175,7 @@ object Person {
     /** "[3条]", "(3)" and the like in front of a message notification. */
     private val UNREAD = Regex("""^\s*(\[\d+条]|\(\d+\)|（\d+）|\d+ new messages?:?)\s*""", RegexOption.IGNORE_CASE)
 
-    /** QQ's "欧欧 (3条新消息)" after the name. */
+    /** QQ's "李四 (3条新消息)" after the name. */
     private val TITLE_COUNT = Regex("""\s*[(（]\d+\s*条(新消息)?[)）]\s*$""")
 
     /** The app speaking for itself: "你收到了 3 条消息", "5 new messages". */
@@ -140,7 +198,7 @@ object Person {
     /**
      * The full name of a chat whose name OCR could not read in full, from a notification of theirs.
      * Only names with emoji qualify: OCR reads everything else. One qualifies when what OCR did
-     * read ([readName]) is that name without its emoji ("欧欧" for "欧欧🌸"), or, for a name that is
+     * read ([readName]) is that name without its emoji ("李四" for "李四🌸"), or, for a name that is
      * nothing but emoji ([readName] null), when the notification's message is on screen now.
      */
     fun nameFromNotifications(readName: String?, onScreen: List<String>, heard: List<Pair<String, String>>): String? {
@@ -273,6 +331,61 @@ object Person {
     /** Two pictures of a name look alike: signatures (block means, 0..255) within a small average difference. */
     fun samePicture(a: IntArray, b: IntArray): Boolean =
         a.size == b.size && a.isNotEmpty() && a.indices.sumOf { kotlin.math.abs(a[it] - b[it]) } / a.size <= 14
+
+    /**
+     * A picture of a name by its shape alone, whatever the colours: dark letters on a light bar
+     * and light ones on a dark bar give the same. Over the part drawn on the picture's commonest
+     * colour (its background), [INK_COLS] x [INK_ROWS] shares of drawn pixels (0..255), then that
+     * part's width per 100 of its height. Null when nothing is drawn.
+     */
+    fun inkSignature(px: IntArray, w: Int, h: Int): IntArray? {
+        if (w <= 0 || h <= 0 || px.size < w * h) return null
+        val counts = HashMap<Int, Int>()
+        for (i in 0 until w * h) counts.merge(px[i] and 0xF0F0F0, 1, Int::plus)
+        val bucket = counts.maxByOrNull { it.value }!!.key
+        var r = 0L; var g = 0L; var b = 0L; var n = 0
+        for (i in 0 until w * h) {
+            val p = px[i]
+            if ((p and 0xF0F0F0) != bucket) continue
+            r += (p shr 16) and 0xFF; g += (p shr 8) and 0xFF; b += p and 0xFF; n++
+        }
+        val br = (r / n).toInt(); val bg = (g / n).toInt(); val bb = (b / n).toInt()
+        val ink = BooleanArray(w * h) { i ->
+            val p = px[i]
+            kotlin.math.abs(((p shr 16) and 0xFF) - br) + kotlin.math.abs(((p shr 8) and 0xFF) - bg) + kotlin.math.abs((p and 0xFF) - bb) > 90
+        }
+        var x0 = w; var y0 = h; var x1 = -1; var y1 = -1
+        for (y in 0 until h) for (x in 0 until w) if (ink[y * w + x]) {
+            x0 = minOf(x0, x); y0 = minOf(y0, y); x1 = maxOf(x1, x); y1 = maxOf(y1, y)
+        }
+        if (x1 < 0) return null
+        val bw = x1 - x0 + 1
+        val bh = y1 - y0 + 1
+        val drawn = IntArray(INK_COLS * INK_ROWS)
+        val all = IntArray(INK_COLS * INK_ROWS)
+        for (y in y0..y1) for (x in x0..x1) {
+            val i = ((y - y0) * INK_ROWS / bh) * INK_COLS + (x - x0) * INK_COLS / bw
+            all[i]++
+            if (ink[y * w + x]) drawn[i]++
+        }
+        return IntArray(INK_COLS * INK_ROWS + 1) { i ->
+            if (i == INK_COLS * INK_ROWS) bw * 100 / bh else if (all[i] == 0) 0 else drawn[i] * 255 / all[i]
+        }
+    }
+
+    /** The same shape ([inkSignature]): as wide for its height within a fifth, and drawn alike cell by cell. */
+    fun sameInk(a: IntArray, b: IntArray): Boolean {
+        val cells = INK_COLS * INK_ROWS
+        if (a.size != cells + 1 || b.size != cells + 1) return false
+        val ra = a[cells].coerceAtLeast(1)
+        val rb = b[cells].coerceAtLeast(1)
+        if (maxOf(ra, rb) * 5 > minOf(ra, rb) * 6) return false
+        return (0 until cells).sumOf { kotlin.math.abs(a[it] - b[it]) } / cells <= INK_SAME
+    }
+
+    private const val INK_COLS = 12
+    private const val INK_ROWS = 4
+    private const val INK_SAME = 28
 
     /**
      * A picture of a name (an emoji) by what light and dark mode leave alone: where its coloured

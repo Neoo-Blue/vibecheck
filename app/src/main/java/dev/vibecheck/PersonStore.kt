@@ -542,7 +542,25 @@ class PersonStore(ctx: Context) {
         pictures.clear()
     }
 
-    init { forgetTitleLinks() }
+    /**
+     * Up to 6.9.1 a screen that is not a chat could be read as one and a label in its title bar
+     * kept as the person: WeChat's Moments and official accounts, the photo picker, the clock,
+     * Soul's follow button, 「1分钟前」 (Person.isLabel). Those records go, unless something was
+     * learned, written or kept for them.
+     */
+    private fun forgetLabels() {
+        if (sp.getInt("labelsv", 0) >= 1) return
+        for (id in index()) {
+            val name = id.substringAfter('|')
+            if (Person.isFingerprint(name) || !Person.isLabel(name)) continue
+            val kept = sp.getInt("$id:learned", 0) > 0 || file(id).exists() || aliasesOf(id).isNotEmpty() ||
+                listOf("bio", "note", "alias").any { !sp.getString("$id:$it", "").isNullOrBlank() }
+            if (!kept) forget(id)
+        }
+        sp.edit().putInt("labelsv", 1).apply()
+    }
+
+    init { forgetTitleLinks(); forgetLabels() }
 
     /** One row per person for the settings screen, most recently seen first. */
     /**
