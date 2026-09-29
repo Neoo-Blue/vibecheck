@@ -287,15 +287,27 @@ object Chat {
         seen: (Box) -> Int = { Sides.UNKNOWN },
     ): Pair<List<Bubble>, List<Pair<String, Box>>> {
         val h = (win.bottom - win.top)
-        // Between the status bar and the end of the title bar. The status bar is where the clock
-        // and icons live, and OCR turns those into convincing-looking garbage.
-        val titles = items.filter { it.second.top >= win.top + h * 0.035 && it.second.top < win.top + h * 0.07 }
+        // Below the status bar, where the clock and icons live and OCR turns those into
+        // convincing-looking garbage, and centred above the end of the title bar. The box OCR
+        // gives is only as tall as the letters: a name in small letters ("anna") starts lower in
+        // the bar than 「小雨」 or "Ken". Taken by where its top was, it once fell just outside
+        // (7.1% down a 1440 x 3120 screen), and the chat went as one whose name is an emoji.
+        val titles = items.filter {
+            it.second.top >= win.top + h * 0.035 && (it.second.top + it.second.bottom) / 2 < win.top + h * TITLE_END
+        }
         val visible = items.filterNot { item -> exclude.any { overlaps(item.second, it) } }
         val kept = messageIndices(visible, win, input).map { visible[it] }.sortedBy { it.second.top }
         val theirs = sides(kept.map { it.second }, win, dp, seen)
         val bubbles = kept.mapIndexed { i, (text, box) -> Bubble(text, theirs[i], box) }
         return order(bubbles) to titles
     }
+
+    /**
+     * Where the middle of a name in the title bar can be, as a share of the window's height. The
+     * bar ends a little past a tenth of the way down (10.8% on a 1440 x 3120 screen, more on a
+     * shorter one); a message scrolled under it shows only a sliver below its edge.
+     */
+    private const val TITLE_END = 0.10
 
     /**
      * A reply that quotes an earlier message shows that message with it, on the replier's side:

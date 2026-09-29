@@ -347,6 +347,52 @@ class PersonStore(ctx: Context) {
             ?.let { (name, d) -> canonical("$pkg|$name").substringAfter('|') to d }
     }
 
+    /**
+     * The fingerprint a chat with this avatar ([Person.avatarHash]) may have been filed under by
+     * mistake: its name is words, which up to 6.9.0 went unread when they sat low in the title bar
+     * (a name in small letters), and the chat went as one named by an emoji. The fingerprint the
+     * avatar is remembered for, when the picture kept for its name has no colour to it, as words
+     * have none and emoji do. Null when there is none.
+     */
+    fun misfiled(pkg: String, avatar: String): String? {
+        val owner = printOwner(pkg, avatar, Person.AVATAR_SAME)?.first ?: return null
+        if (!Person.isFingerprint(owner)) return null
+        val id = "$pkg|$owner"
+        return owner.takeIf { pictureOf(id) != null && namePrint(id) == null }
+    }
+
+    /**
+     * The chat [from], filed under a fingerprint, is [to] (see [misfiled]): what is known about the
+     * person goes to [to] as [link] takes it, and so does what belongs to the chat itself: its
+     * kept history, the newest messages already counted, the notes already written on it, whether
+     * it is paused. The fingerprint then leads to [to], so the avatar still finds the chat on a
+     * look that cannot read its name.
+     */
+    fun adopt(from: String, to: String) {
+        val into = canonical(to)
+        if (from == into || canonical(from) != from) return
+        val tail = sp.getString("$from:tail", null)
+        val notes = sp.getString("$from:notes", null)
+        val muted = sp.getBoolean("$from:muted", false)
+        val learnedAt = sp.getLong("$from:learnedat", 0L)
+        val archived = sp.getInt("$from:archived", 0)
+        val complete = sp.getBoolean("$from:archivedone", false)
+        // Kept under the chat it was read from: the history file goes with the chat, where more is
+        // added to it and where a reply looks for what came before the screen.
+        val moved = file(from).exists() && !file(to).exists() && runCatching { file(from).renameTo(file(to)) }.getOrDefault(false)
+        link(from, into)
+        val e = sp.edit()
+        if (moved) {
+            e.putInt("$to:archived", archived).putBoolean("$to:archivedone", complete)
+                .remove("$from:archived").remove("$from:archivedone")
+        }
+        if (!tail.isNullOrEmpty() && sp.getString("$into:tail", null).isNullOrEmpty()) e.putString("$into:tail", tail)
+        if (!notes.isNullOrEmpty() && sp.getString("$into:notes", null).isNullOrEmpty()) e.putString("$into:notes", notes)
+        if (muted) e.putBoolean("$into:muted", true)
+        if (learnedAt > sp.getLong("$into:learnedat", 0L)) e.putLong("$into:learnedat", learnedAt)
+        e.apply()
+    }
+
     /** How much is known about someone in [pkg], by the name their record goes under. */
     fun known(pkg: String, name: String): Person.Known {
         val c = canonical("$pkg|$name")

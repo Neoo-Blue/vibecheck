@@ -4,6 +4,28 @@ APKs for every version are on the [releases page](https://github.com/Neoo-Blue/v
 Each section below is also that release's notes: the Release workflow publishes the section whose
 heading matches the tag.
 
+## 6.9.1
+
+- **A name in small letters is read as a name.**
+  - OCR gives each text a box only as tall as its letters, and a name was looked for by where
+    that box starts. A name with no capitals or tall letters starts lower in the title bar. On a
+    tall screen it fell just outside the place a name was looked for.
+  - Such a chat was then taken for one whose name is an emoji. It was known by its avatar, and
+    the card showed a picture cut from the title bar, often only the first letter.
+  - Now a name counts by where its middle sits in the title bar.
+  - The first time such a chat's name is read, everything kept under its avatar goes to the name:
+    memory, profile, kept history and settings. This happens only if both still match:
+    - the avatar;
+    - the picture of the title bar that was kept.
+- **A misread character is no longer repeated back.**
+  - OCR now and then reads a character as a look-alike (「好啊」 as 「好响」).
+  - Drafts and deep reads took the misread word as it was, and wrote it back into a reply.
+  - Every model that reads text from the screen is now told this can happen:
+    - the judgment;
+    - drafts and deep reads;
+    - profiles, and the write-ups of your day.
+  - It reads such a word by what the chat means, and writes what was meant when it quotes.
+
 ## 6.9.0
 
 - **Nothing is read in apps you unchecked.**

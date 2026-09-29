@@ -41,6 +41,40 @@ class PersonTest {
         assertEquals("Mia", Person.peerName(titles, emptyList(), win))
     }
 
+    @Test fun aNameInSmallLettersIsStillTheTitle() {
+        // 1440x3120 as WeChat draws a chat: the clock, a name with no tall letters in the middle of
+        // the title bar (its box starts 7.1% down, below where a 「小雨」 starts), the first message
+        // under the bar.
+        val items = listOf(
+            "8:31" to Chat.Box(40, 30, 190, 100),
+            "anna" to Chat.Box(634, 222, 793, 256),
+            "在吗" to Chat.Box(1060, 375, 1200, 440),
+        )
+        val (bubbles, titles) = Chat.fromOcr(items, win, emptyList())
+        assertEquals(listOf("anna"), titles.map { it.first })
+        assertEquals("anna", Person.peerName(titles, emptyList(), win))
+        assertEquals(listOf("在吗"), bubbles.map { it.text })
+        // A message scrolled under the bar, a sliver of it showing below the bar's edge: not a title.
+        val sliver = listOf("anna" to Chat.Box(634, 222, 793, 256), "好的呀" to Chat.Box(200, 332, 500, 348))
+        assertEquals(listOf("anna"), Chat.fromOcr(sliver, win, emptyList()).second.map { it.first })
+        // A shorter screen, where the bar is a larger share of it.
+        val short = Chat.Box(0, 0, 1080, 1920)
+        assertEquals("anna", Person.peerName(Chat.fromOcr(listOf("anna" to Chat.Box(470, 142, 610, 170)), short, emptyList()).second, emptyList(), short))
+    }
+
+    @Test fun theLineUnderANameIsNotTheName() {
+        // Telegram read by OCR: the name, and under it what they are doing, nearer the middle.
+        val items = listOf(
+            "Ken" to Chat.Box(250, 165, 380, 225),
+            "recording audio..." to Chat.Box(250, 240, 620, 290),
+        )
+        val (_, titles) = Chat.fromOcr(items, win, emptyList())
+        assertEquals(2, titles.size)
+        assertEquals("Ken", Person.peerName(titles, emptyList(), win))
+        // Side by side is not one under the other.
+        assertEquals("小雨", Person.peerName(listOf("小雨" to box(600, 170, 840, 240), "Mute" to box(900, 170, 1040, 240)), emptyList(), win))
+    }
+
     @Test fun peerNameFallsBackToAvatarDescription() {
         assertEquals("小雨", Person.peerName(emptyList(), listOf("小雨头像"), win))
         // junk-only titles must not win over a usable avatar description

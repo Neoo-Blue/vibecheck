@@ -465,8 +465,13 @@ object OpenRouter {
             }
         }
         if (fromOcr) {
-            append(L.t("\n注意：这些文字是从手机屏幕识别出来的，表情符号和表情包图片没有被识别出来。",
-                "\nNote: this text was OCR'd from the screen; emoji and stickers were not captured."))
+            // A character read as a look-alike (「好啊」 as 「好响」) was taken at its word, and
+            // drafts picked the misread word up as it was.
+            append(L.t("\n注意：这些文字是从手机屏幕识别出来的：表情符号和表情包图片没有被识别出来，个别字也可能被认成了形近字（比如「啊」认成「响」）。" +
+                    "读不通的字词，按上下文当成原本的字来理解；接 Ta 的话或者引用时写原本的字，不要照抄认错的字。",
+                "\nNote: this text was OCR'd from the screen: emoji and stickers were not captured, and a character here and there " +
+                    "may have been misread as a look-alike. Read a word that makes no sense as the one that was meant; when picking " +
+                    "up or quoting their words, write what was meant, never the misread form."))
             if (hasImage) append(SCREENSHOT_NOTE)
         }
     }
