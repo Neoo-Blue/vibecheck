@@ -61,7 +61,7 @@ class MeTest {
 
     private val profile = """
         【我是谁】
-        • 在上海做产品经理，住静安
+        • 在一家公司做设计，住城东
         【我怎么说话】
         • 短句，爱用「哈哈哈」和「好滴」，很少用句号
         【我喜欢】
@@ -76,7 +76,7 @@ class MeTest {
         val b = Me.brief(profile, listOf("2026-09-27" to "• 加班到九点\n• 约了小明周六爬山"))!!
         val lines = b.lines()
         assertTrue(lines[0].startsWith("【我怎么说话】短句"))
-        assertTrue(b.contains("【我是谁】在上海做产品经理"))
+        assertTrue(b.contains("【我是谁】在一家公司做设计"))
         assertTrue(b.contains("【我最近在忙】新版本上线"))
         assertTrue(b.contains("9月27日 周日：加班到九点；约了小明周六爬山"))
         assertFalse("the people list is for the page, not every reply", b.contains("小明：朋友"))
@@ -90,7 +90,7 @@ class MeTest {
         assertEquals("voice", Me.idOf("How I talk"))
         assertEquals("busy", Me.idOf(" 我最近在忙 "))
         assertNull(Me.idOf("Ta 是谁"))
-        assertEquals("在上海做产品经理，住静安", Me.oneLine(profile))
+        assertEquals("在一家公司做设计，住城东", Me.oneLine(profile))
         assertNull(Me.oneLine(""))
     }
 

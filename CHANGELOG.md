@@ -4,6 +4,29 @@ APKs for every version are on the [releases page](https://github.com/Neoo-Blue/v
 Each section below is also that release's notes: the Release workflow publishes the section whose
 heading matches the tag.
 
+## 6.9.2
+
+- **No more "people" made from screens that are not chats.**
+  - A screen of an app could be read as a chat, and a label in its title bar kept as a person:
+    WeChat's Moments and official accounts, or the photo picker.
+  - Such a screen is no longer read as a chat.
+  - None of these is ever a name:
+    - such a screen's title;
+    - Soul's follow button (「关注」), which beside a name made of marks was taken for the name;
+    - a time or presence line such as 「1分钟前」 or 「刚刚在线」;
+    - a clock's timer, which versions up to 6.8.9 could read in place of a chat.
+  - People kept that way before go from the People tab, unless something was learned, written or
+    kept for them.
+- **A name of one letter is read.**
+  - A name like "J" was taken for an emoji name. It showed as 「未命名联系人」.
+  - One letter in the middle of the title bar is now the name, if the picture of it has no colour
+    to it, as words have none and emoji do.
+  - What was kept for such a chat moves to its name, as it does for a name in small letters.
+- **A chat filed under its avatar finds its name in dark mode too.**
+  - The picture of the title bar that was kept is now compared by its shape, not its colours.
+  - Before, a picture taken in light mode did not match the same name in dark mode, and what was
+    kept stayed under 「未命名联系人」.
+
 ## 6.9.1
 
 - **A name in small letters is read as a name.**
@@ -599,7 +622,7 @@ has to use OCR (WeChat, Telegram), emoji cannot be read at all, so:
 - it is labelled with the emoji itself, a small picture of the name from the chat's title bar,
   on the card and in People, never with an internal code;
 - the real name, emoji and all, comes from their message notifications, which also puts the
-  emoji back on names OCR read only in part ("欧欧" → "欧欧🌸");
+  emoji back on names OCR read only in part ("李四" → "李四🌸");
 - ⋯ → Rename names anyone by hand, emoji included;
 - "对方正在输入…" is no longer taken for a name.
 
@@ -626,7 +649,7 @@ write the profile. Notifications from watched apps are now read for the sender's
 (kept in memory, never stored or sent). Kept histories stay in app-private storage and are not in Backup exports;
 Tools → People → More… deletes one.
 
-中文：「学习此人」现在会翻完你们的全部聊天记录（不再限 60 页，翻得更快，大约一秒一页），存在手机上，之后边聊边补；再学习只读新增的部分。档案按全部记录分批写成，详细得多：Ta 是你的什么人、有多亲近、Ta 是谁、相处方式、Ta 和你各自怎么说话（附原话）、喜好、常聊的事、梗、重要的事、雷区、Ta 难过时怎么办。回复草稿会带上完整档案和最多 8 段你以前对 Ta 的真实回复，写得像你本人而不是模板。关系和亲近程度分开：关系好不等于是恋人；知道关系后直接告诉 Jev，不再让它猜，不会再把好朋友判成恋爱。「恋爱或亲密关系」改名「恋人或伴侣」，没有背景时不再默认是亲密关系。名字是 emoji 的联系人：能读到文字的应用直接认；截图识字的（微信、Telegram）按头像认，并用标题栏上那个 emoji 的小图来标，不再显示代码；Ta 发来消息后，从通知里自动拿到带 emoji 的真名（「欧欧」也会补成「欧欧🌸」）；⋯ → 改名可以手动起名；「对方正在输入…」不再被当成名字。Soul 给所有头像都标着「Souler」，以前认不出名字时就拿它当名字，结果所有这样的 Soul 聊天都成了同一个人「Souler」；现在这类通用标签不会再当成名字，只由符号组成的名字（如「...」）也能认，隐藏的控件不再读取；人物记忆里之前的「Souler」可以忘掉。学习后停在旧记录页时不再拿旧消息去判断。注意：学习会把和这个人的全部聊天记录发给你的 OpenRouter 模型。
+中文：「学习此人」现在会翻完你们的全部聊天记录（不再限 60 页，翻得更快，大约一秒一页），存在手机上，之后边聊边补；再学习只读新增的部分。档案按全部记录分批写成，详细得多：Ta 是你的什么人、有多亲近、Ta 是谁、相处方式、Ta 和你各自怎么说话（附原话）、喜好、常聊的事、梗、重要的事、雷区、Ta 难过时怎么办。回复草稿会带上完整档案和最多 8 段你以前对 Ta 的真实回复，写得像你本人而不是模板。关系和亲近程度分开：关系好不等于是恋人；知道关系后直接告诉 Jev，不再让它猜，不会再把好朋友判成恋爱。「恋爱或亲密关系」改名「恋人或伴侣」，没有背景时不再默认是亲密关系。名字是 emoji 的联系人：能读到文字的应用直接认；截图识字的（微信、Telegram）按头像认，并用标题栏上那个 emoji 的小图来标，不再显示代码；Ta 发来消息后，从通知里自动拿到带 emoji 的真名（「李四」也会补成「李四🌸」）；⋯ → 改名可以手动起名；「对方正在输入…」不再被当成名字。Soul 给所有头像都标着「Souler」，以前认不出名字时就拿它当名字，结果所有这样的 Soul 聊天都成了同一个人「Souler」；现在这类通用标签不会再当成名字，只由符号组成的名字（如「...」）也能认，隐藏的控件不再读取；人物记忆里之前的「Souler」可以忘掉。学习后停在旧记录页时不再拿旧消息去判断。注意：学习会把和这个人的全部聊天记录发给你的 OpenRouter 模型。
 
 ## 6.6.0
 

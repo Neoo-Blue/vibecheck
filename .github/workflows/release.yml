@@ -113,8 +113,8 @@ jobs:
           # This version's section of the changelog, without its heading.
           awk -v v="$VERSION" '/^## / { if (found) exit; if ($2 == v) { found = 1; next } } found' CHANGELOG.md > notes.md
 
-          EN="Signed with the Vibecheck release key: it installs over 6.7.1 and later as an update, and later versions install over it. Coming from 6.7.0 or earlier (each signed with a one-off key), uninstall once first; export people memory under Tools > Backup before, and import it after."
-          ZH="使用 Vibecheck 固定签名：6.7.1 及以后的版本可以互相直接覆盖升级。从 6.7.0 或更早的版本（每次签名都不同）升级，需要先卸载一次：卸载前在「工具 → 备份」导出人物记忆，装好后导入。"
+          EN="Signed with the Vibecheck release key: it installs over the version on your phone as an update, and later versions install over it."
+          ZH="使用 Vibecheck 固定签名：直接覆盖安装手机上的版本即可升级，以后的版本也能直接覆盖它。"
           {
             echo
             echo "---"

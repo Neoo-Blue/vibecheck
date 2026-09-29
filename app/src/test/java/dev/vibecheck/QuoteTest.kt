@@ -49,7 +49,7 @@ class QuoteTest {
         assertTrue(Chat.isQuote("@:明天几点见"))
         assertFalse("elsewhere a message", Chat.isQuote("O：明天几点见"))
         // An emoji name, where the app gives text.
-        assertTrue(Chat.isQuote("🍵：明天几点见"))
+        assertTrue(Chat.isQuote("🌵：明天几点见"))
     }
 
     @Test fun aQuotedPictureIsAQuote() {

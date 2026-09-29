@@ -76,7 +76,7 @@ class ProfileTest {
 
     private val profile = """
         【Ta 是谁】
-        • 在杭州当老师，养了一只橘猫
+        • 在一所学校当老师，养了一只猫
         【我们怎么相处】• 常一起吐槽工作，Ta 更主动
         【Ta 怎么说话】
         • 爱说「真的假的」，很少用表情
@@ -173,7 +173,7 @@ class CloseTest {
 class EmojiNameTest {
 
     @Test fun emojiNamesAreNames() {
-        for (n in listOf("🐟", "❤️", "Dory🐟", "✨小鱼✨", "👨‍👩‍👧", "🧑🏻‍💻", "☁️☁️", "小鱼🐟2号", "♡欧欧♡")) {
+        for (n in listOf("🐟", "❤️", "Dory🐟", "✨小鱼✨", "👨‍👩‍👧", "🧑🏻‍💻", "☁️☁️", "小鱼🐟2号", "♡李四♡")) {
             assertTrue(n, Person.looksLikeName(n))
         }
     }
@@ -187,7 +187,7 @@ class EmojiNameTest {
             assertFalse(n, Person.looksLikeName(n))
             assertTrue(n, Person.isTyping(listOf(n to Chat.Box(0, 0, 10, 10))))
         }
-        assertFalse(Person.isTyping(listOf("欧欧" to Chat.Box(0, 0, 10, 10))))
+        assertFalse(Person.isTyping(listOf("李四" to Chat.Box(0, 0, 10, 10))))
     }
 }
 
@@ -195,18 +195,18 @@ class EmojiLabelTest {
 
     @Test fun notificationsGiveTheNameAsWritten() {
         assertEquals("🐟" to "今天去哪", Person.fromNotification("🐟", "[2条]今天去哪"))
-        assertEquals("欧欧🌸" to "在吗", Person.fromNotification("欧欧🌸", "欧欧🌸: 在吗"))
+        assertEquals("李四🌸" to "在吗", Person.fromNotification("李四🌸", "李四🌸: 在吗"))
         assertEquals("爬山群" to "张三: 几点集合", Person.fromNotification("爬山群", "张三: 几点集合"))
         assertNull(Person.fromNotification("微信", "你收到了 3 条消息"))
         assertNull(Person.fromNotification("WeChat", "在吗"))
         assertNull(Person.fromNotification("🐟", "[3条]"))
-        assertEquals("欧欧🌸" to "在吗", Person.fromNotification("欧欧🌸 (3条新消息)", "在吗"))
+        assertEquals("李四🌸" to "在吗", Person.fromNotification("李四🌸 (3条新消息)", "在吗"))
     }
 
     @Test fun anEmojiNameComesBackFromItsNotification() {
-        val heard = listOf("小李" to "吃了吗", "欧欧🌸" to "在吗", "🐟" to "今天去哪玩")
+        val heard = listOf("小李" to "吃了吗", "李四🌸" to "在吗", "🐟" to "今天去哪玩")
         // OCR read the letters and dropped the emoji: the letters match.
-        assertEquals("欧欧🌸", Person.nameFromNotifications("欧欧", listOf("随便"), heard))
+        assertEquals("李四🌸", Person.nameFromNotifications("李四", listOf("随便"), heard))
         // Nothing readable at all: their message on screen says whose chat this is.
         assertEquals("🐟", Person.nameFromNotifications(null, listOf("今天去哪玩"), heard))
         assertNull(Person.nameFromNotifications(null, listOf("好的"), heard))
@@ -216,10 +216,10 @@ class EmojiLabelTest {
     }
 
     @Test fun emojiIsFoundAndTakenOut() {
-        assertTrue(Person.hasPictograph("欧欧🌸"))
+        assertTrue(Person.hasPictograph("李四🌸"))
         assertTrue(Person.hasPictograph("❤️"))
-        assertFalse(Person.hasPictograph("欧欧"))
-        assertEquals("欧欧", Person.stripEmoji("欧欧🌸"))
+        assertFalse(Person.hasPictograph("李四"))
+        assertEquals("李四", Person.stripEmoji("李四🌸"))
         assertEquals("", Person.stripEmoji("👨‍👩‍👧❤️"))
         assertEquals("小鱼", Person.stripEmoji("✨小鱼✨"))
     }
@@ -252,9 +252,9 @@ class NameSourceTest {
     }
 
     @Test fun realAvatarLabelsAndTitlesStillWin() {
-        assertEquals("欧欧", Person.peerName(listOf(at("在线", 200)), listOf("欧欧头像"), win))
+        assertEquals("李四", Person.peerName(listOf(at("在线", 200)), listOf("李四头像"), win))
         assertEquals("小李", Person.peerName(listOf(at("在线", 200)), listOf("小李的头像"), win))
-        assertEquals("欧欧🌸", Person.peerName(listOf(at("...", 155), at("欧欧🌸", 540)), listOf("Souler头像"), win, symbols = true))
+        assertEquals("李四🌸", Person.peerName(listOf(at("...", 155), at("李四🌸", 540)), listOf("Souler头像"), win, symbols = true))
     }
 
     @Test fun marksAreANameOnlyWithoutDigits() {

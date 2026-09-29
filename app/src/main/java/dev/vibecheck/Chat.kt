@@ -138,7 +138,7 @@ object Chat {
         if (box.bottom > win.top + h * 0.96) return true
         // Centered short text in a chat list is a date divider or "对方撤回了一条消息". Centered
         // means as far from both edges: next to an avatar, a message of theirs that ends past
-        // the middle ("最近太忙了，下次再说吧" on Soul) has its centre near the middle too.
+        // the middle ("这周有点忙，改天再说吧" on Soul) has its centre near the middle too.
         if (abs((box.left - win.left) - (win.right - box.right)) < win.width * 0.06 && box.width < win.width * 0.55) return true
         return false
     }

@@ -140,10 +140,10 @@ class RelationshipTest {
 
     @Test fun theDeepReadIsToldWhoTheyAre() {
         val answers = mapOf("intent" to Jev.Answer.Dist("在分享观点或心情", mapOf("在分享观点或心情" to 0.9)))
-        val p = OpenRouter.deepPrompt("欧欧", "", null, null, null, listOf("对方" to "不想出门"), answers,
+        val p = OpenRouter.deepPrompt("李四", "", null, null, null, listOf("对方" to "不想出门"), answers,
             false, false, "朋友", relationship = "朋友")
         assertTrue(p.contains("我和对方的关系：朋友"))
-        val guessed = OpenRouter.deepPrompt("欧欧", "", null, null, null, listOf("对方" to "不想出门"), answers, false, false, "朋友")
+        val guessed = OpenRouter.deepPrompt("李四", "", null, null, null, listOf("对方" to "不想出门"), answers, false, false, "朋友")
         assertFalse("a guess from one turn is not stated as fact", guessed.contains("我和对方的关系"))
     }
 

@@ -140,6 +140,8 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     private var lastNamePicture: Bitmap? = null
     /** Whose fingerprint the avatar in the last OCR pass is, when a chat may have been filed under it by mistake (PersonStore.misfiled). */
     private var lastMisfiled: String? = null
+    /** A name of one letter the last OCR pass read in the middle of the title bar (Person.oneLetterName). */
+    private var lastLetterName: String? = null
     private var viaOcr = false
     private var onHomeScreen = false
     private var hasInput = false
@@ -326,7 +328,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
 
     /**
      * A name OCR could not read in full gets its real one, emoji and all, from their
-     * notifications: "欧欧" becomes "欧欧🌸", an unnamed emoji-only chat becomes "🐟". Kept as the
+     * notifications: "李四" becomes "李四🌸", an unnamed emoji-only chat becomes "🐟". Kept as the
      * name you would give them, so it shows everywhere; never over one you gave yourself.
      */
     private fun nameFromNotifications(record: PersonStore.Record, bubbles: List<Chat.Bubble>) {
@@ -457,6 +459,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         lastAvatar = ""
         lastNamePicture = null
         lastMisfiled = null
+        lastLetterName = null
         handle(bubbles)
     }
 
@@ -559,9 +562,16 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                 // No name to read in the title bar: keep a picture of it (the emoji the name is made
                 // of). A name to read, and an avatar a chat filed under a fingerprint had: the
                 // picture too, to tell whether this is that chat (see [adopt]).
-                val named = titles.any { Person.looksLikeName(it.first) }
+                val readable = titles.any { Person.looksLikeName(it.first) }
+                val clear = !covered && !Person.isTyping(titles)
+                var picture = if (clear && !readable) namePicture(shot.bmp) else null
+                // One letter in the middle of the bar ("J"): the name, when its picture is of words
+                // rather than an emoji that OCR read as a letter.
+                val letter = if (readable) null else Person.oneLetterName(titles, win)
+                    ?.takeIf { picture?.let { p -> emojiPrint(p) == null } == true }
+                val named = readable || letter != null
                 val misfiled = if (named && avatar.isNotEmpty()) people.misfiled(targetPkg, avatar) else null
-                val picture = if (!covered && (!named || misfiled != null) && !Person.isTyping(titles)) namePicture(shot.bmp) else null
+                if (picture == null && clear && misfiled != null) picture = namePicture(shot.bmp)
                 shot.bmp.recycle()
                 if (gen != screenGen) { rescanSoon(); return@read }   // the screen changed under the capture
                 // Another app came up while the picture was read: it is not this chat.
@@ -573,6 +583,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                 lastAvatar = avatar
                 lastNamePicture = picture
                 lastMisfiled = misfiled
+                lastLetterName = letter
                 lastWindow = win
                 lastTitles = titles
                 lastDescs = emptyList()
@@ -672,7 +683,9 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         if (read.isEmpty()) { inconclusive("nothing read"); return }
         emptyReads = 0
         // The chat list is also full of names and text; judging it would be nonsense.
-        if (onHomeScreen || !Chat.inConversation(read, hasInput)) {
+        // Nor is a screen of the app titled as one (Moments, an official account, the photo
+        // picker): its title was kept as a person.
+        if (onHomeScreen || !Chat.inConversation(read, hasInput) || Person.notAChat(lastTitles)) {
             activeId = null
             card.hide()
             return
@@ -685,7 +698,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         // A name hidden by typing is not an unreadable one: no fingerprint for it, or a contact
         // with a perfectly good name would be filed under a stray fingerprint record.
         byAvatar = false
-        val name = Person.peerName(lastTitles, lastDescs, lastWindow, symbols = !viaOcr)
+        val name = Person.peerName(lastTitles, lastDescs, lastWindow, symbols = !viaOcr) ?: lastLetterName
             ?: (if (Person.isTyping(lastTitles)) lastPeerName?.takeIf { activeId != null } else unreadableName(read))
             ?: UNKNOWN
         lastPeerName = name
@@ -997,7 +1010,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     }
 
     /**
-     * "欧欧 · 朋友 · 很铁": who, what kind of chat, how close. A misread contact shows at a glance.
+     * "李四 · 朋友 · 很铁": who, what kind of chat, how close. A misread contact shows at a glance.
      * Someone whose name is only a picture (emoji OCR cannot read) gets the picture there.
      */
     private fun cardTitle(r: PersonStore.Record, situation: String?): String = listOfNotNull(
@@ -2253,10 +2266,11 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
 
     /**
      * A chat whose name is words, filed under a fingerprint as if it were an emoji while the name
-     * was not looked for where it sat (up to 6.9.0, a name in small letters like "anna"): once it
-     * reads, what was kept under the fingerprint goes to the name. Only when the avatar is the
-     * fingerprint's (PersonStore.misfiled) and the title bar looks as the picture kept for it
-     * did: two people with the same default avatar are not taken for one.
+     * was not read where it sat (up to 6.9.0 a name in small letters like "anna", up to 6.9.1 one
+     * of one letter): once it reads, what was kept under the fingerprint goes to the name. Only
+     * when the avatar is the fingerprint's (PersonStore.misfiled) and the title bar has the shape
+     * of the picture kept for it, in dark mode or light: two people with the same default avatar
+     * are not taken for one.
      */
     private fun adopt(name: String) {
         val from = lastMisfiled ?: return
@@ -2264,11 +2278,18 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         val fromId = "$targetPkg|$from"
         // Not while their history is being read or a profile written into the record that goes.
         if (learning || fromId in writing) return
-        val kept = people.pictureOf(fromId) ?: return
-        if (!Person.samePicture(pictureSignature(kept), pictureSignature(pic))) return
+        val kept = people.pictureOf(fromId)?.let { inkSignature(it) } ?: return
+        val seen = inkSignature(pic) ?: return
+        if (!Person.sameInk(kept, seen)) return
         lastMisfiled = null
         people.adopt(fromId, Person.id(targetPkg, name))
         Diag.log("$from is $name: what was kept under it goes to the name")
+    }
+
+    private fun inkSignature(bmp: Bitmap): IntArray? {
+        val px = IntArray(bmp.width * bmp.height)
+        bmp.getPixels(px, 0, bmp.width, 0, 0, bmp.width, bmp.height)
+        return Person.inkSignature(px, bmp.width, bmp.height)
     }
 
     /**

@@ -24,7 +24,7 @@ class ChipRowTest {
         "嗯" to box(193, 755, 230, 785),
         "14:16" to box(432, 870, 492, 895),
         "去不去嘛" to box(602, 965, 730, 1000),
-        "最近太忙了，下次再说吧" to box(193, 1292, 548, 1328),
+        "这周有点忙，改天再说吧" to box(193, 1292, 548, 1328),
         "14:25" to box(432, 1410, 492, 1435),
         "那等你忙完呀" to box(540, 1505, 730, 1540),
     )
@@ -42,7 +42,7 @@ class ChipRowTest {
 
     @Test fun theQuickReplyStripIsNotMessages() {
         val bubbles = read(title + messages + chips)
-        assertEquals(listOf("周末一起去看展好吗", "哪个", "嗯", "去不去嘛", "最近太忙了，下次再说吧", "那等你忙完呀"), bubbles.map { it.text })
+        assertEquals(listOf("周末一起去看展好吗", "哪个", "嗯", "去不去嘛", "这周有点忙，改天再说吧", "那等你忙完呀"), bubbles.map { it.text })
         assertEquals(listOf(false, true, true, false, true, false), bubbles.map { it.incoming })
         // My message is the newest: nothing to answer, and no card pops up by itself.
         assertNull(Chat.triggerKey(Chat.order(bubbles)))
@@ -145,7 +145,7 @@ class ReplyPromptTest {
     }
 
     @Test fun thePromptSaysWhoseTurnItIs() {
-        assertEquals("最后一句是我说的（「那等你忙完呀」），Ta 还没回。", OpenRouter.turn(listOf("对方" to "最近太忙了，下次再说吧", "我" to "那等你忙完呀")))
+        assertEquals("最后一句是我说的（「那等你忙完呀」），Ta 还没回。", OpenRouter.turn(listOf("对方" to "这周有点忙，改天再说吧", "我" to "那等你忙完呀")))
         assertEquals("最后一句是 Ta 说的，轮到我了。", OpenRouter.turn(listOf("对方" to "在吗")))
         assertNull(OpenRouter.turn(emptyList()))
         val p = OpenRouter.deepPrompt("…", "", null, null, null, listOf("对方" to "嗯", "我" to "去不去嘛"), emptyMap(), false, false)
@@ -192,7 +192,7 @@ class ArchiveContextTest {
 
     @Test fun soulsStripKeptByOlderVersionsIsDropped() {
         val strip = listOf("我" to "猜拳", "我" to "比心", "对方" to "礼物", "对方" to "下午好")
-        val real = listOf("对方" to "最近太忙了，下次再说吧", "我" to "那等你忙完呀")
+        val real = listOf("对方" to "这周有点忙，改天再说吧", "我" to "那等你忙完呀")
         assertEquals(real + real, Archive.withoutStrips(real + strip + real))
         assertEquals(real, Archive.withoutStrips(real + strip))
         // What people do send stays: a greeting, goodnights, one sticker word, two in a row.
@@ -476,9 +476,9 @@ class PeoplePageTest {
     @After fun chinese() { L.en = false }
 
     @Test fun oneLineAboutThemComesFromHowYouGetAlong() {
-        val profile = "【Ta 是谁】\n• 在杭州当老师\n【我们怎么相处】\n• 常一起吐槽工作，有事第一个找对方\n【Ta 喜欢】\n• 爬山"
+        val profile = "【Ta 是谁】\n• 在一所学校当老师\n【我们怎么相处】\n• 常一起吐槽工作，有事第一个找对方\n【Ta 喜欢】\n• 爬山"
         assertEquals("常一起吐槽工作，有事第一个找对方", Profile.oneLine(profile))
-        assertEquals("在杭州当老师", Profile.oneLine("【Ta 是谁】\n• 在杭州当老师"))
+        assertEquals("在一所学校当老师", Profile.oneLine("【Ta 是谁】\n• 在一所学校当老师"))
         assertEquals("对方是我的好友，关系亲密，说话很…", Profile.oneLine("• 对方是我的好友，关系亲密，说话很随便，常互相开玩笑。", max = 17))
         assertNull(Profile.oneLine(""))
     }
