@@ -4,6 +4,28 @@ APKs for every version are on the [releases page](https://github.com/Neoo-Blue/v
 Each section below is also that release's notes: the Release workflow publishes the section whose
 heading matches the tag.
 
+## 6.9.3
+
+- **The judgment uses far fewer tokens, and reads each turn the same.** It was most of what the
+  app used: it runs on every new message, and for most turns asks twice.
+  - **Scrolling up to read older messages is no longer judged.**
+    - Before, each screen of history was judged on the way up, and the newest turn again on the
+      way back down.
+    - Now the card keeps the reading of the newest turn.
+  - **Each request is a fifth to a third smaller.**
+    - One line per message, instead of a small record around each.
+    - How I write goes to drafts and deep reads, not to the judgment of their turn.
+    - From the long run, only what a turn is read against: who opens, how fast I reply, how
+      often things went badly, and on how many days we talked. Not the message counts, which
+      change with every message.
+    - How they write, as what stands out.
+    - The last three turns rather than five.
+    - A shorter note about OCR.
+    - What changes least goes first, which a provider that keeps a recent start charges less for.
+  - **Who someone is to you, when not known, is not asked every turn.**
+    - Once five turns in a row have answered it the same, it is not asked again for a while.
+    - It is asked again every twelfth turn, so a change is seen.
+
 ## 6.9.2
 
 - **No more "people" made from screens that are not chats.**

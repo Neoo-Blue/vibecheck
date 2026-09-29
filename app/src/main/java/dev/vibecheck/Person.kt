@@ -690,7 +690,24 @@ object Person {
         if (s.msgs < 5) return null
         val pct = { n: Int -> n.coerceAtMost(s.msgs) * 100 / s.msgs }
         val avg = s.chars / s.msgs
-        val traits = listOfNotNull(
+        val numbers = L.t(
+            "平均 $avg 字，带表情 ${pct(s.emoji)}%，问句 ${pct(s.questions)}%，笑 ${pct(s.laughs)}%（共 ${s.msgs} 条）",
+            "avg $avg chars, emoji ${pct(s.emoji)}%, questions ${pct(s.questions)}%, laughing ${pct(s.laughs)}% (${s.msgs} messages)")
+        return (traits(s) + numbers).joinToString(L.t("；", "; "))
+    }
+
+    /**
+     * How they write, for the judge: what stands out, without the numbers under it, which move
+     * with every message and so change every request while telling a single turn nothing more.
+     * Null when nothing stands out.
+     */
+    fun theirTraits(s: Style): String? =
+        if (s.msgs < 5) null else traits(s).joinToString(L.t("；", "; ")).ifEmpty { null }
+
+    private fun traits(s: Style): List<String> {
+        val pct = { n: Int -> n.coerceAtMost(s.msgs) * 100 / s.msgs }
+        val avg = s.chars / s.msgs
+        return listOfNotNull(
             when {
                 avg <= 6 -> L.t("话很短，简短的回复是 Ta 的常态", "writes very short; brief replies are normal for them")
                 avg >= 25 -> L.t("话多，常发长消息", "writes a lot, often long messages")
@@ -704,10 +721,6 @@ object Person {
             },
             if (pct(s.questions) >= 30) L.t("常问问题", "asks a lot of questions") else null,
         )
-        val numbers = L.t(
-            "平均 $avg 字，带表情 ${pct(s.emoji)}%，问句 ${pct(s.questions)}%，笑 ${pct(s.laughs)}%（共 ${s.msgs} 条）",
-            "avg $avg chars, emoji ${pct(s.emoji)}%, questions ${pct(s.questions)}%, laughing ${pct(s.laughs)}% (${s.msgs} messages)")
-        return (traits + numbers).joinToString(L.t("；", "; "))
     }
 
     /** Fold another record's style into this one (linking the same person across apps). */
@@ -731,7 +744,19 @@ object Person {
      * goes on and still follows a change: the first turns count fully, and past [NORM_WINDOW]
      * each new turn moves it by 1/[NORM_WINDOW].
      */
-    class Norm(var turns: Int = 0, var danger: Double = 0.0, val intents: LinkedHashMap<String, Double> = LinkedHashMap())
+    /**
+     * How a turn with them usually reads: [intents] and [danger] as Jev read them, and the
+     * relationship ([situations], Relationship.KEYS) as each turn that asked it was answered,
+     * [asked] times so far, the last time [since] turns ago (see [steadySituation]).
+     */
+    class Norm(
+        var turns: Int = 0,
+        var danger: Double = 0.0,
+        val intents: LinkedHashMap<String, Double> = LinkedHashMap(),
+        val situations: LinkedHashMap<String, Double> = LinkedHashMap(),
+        var asked: Int = 0,
+        var since: Int = 0,
+    )
 
     const val NORM_WINDOW = 40
     private const val NORM_MIN = 5
@@ -746,6 +771,34 @@ object Person {
         // What no longer carries any weight goes.
         n.intents.keys.filter { n.intents.getValue(it) < 0.02 }.forEach { n.intents.remove(it) }
     }
+
+    /** What this turn's situation question answered: the relationship, as Jev read it. */
+    fun observeSituation(n: Norm, situation: String) {
+        n.asked++
+        n.since = 0
+        val w = 1.0 / minOf(n.asked, SITUATION_WINDOW)
+        for (k in n.situations.keys.toList()) n.situations[k] = n.situations.getValue(k) * (1 - w)
+        if (situation.isNotBlank()) n.situations[situation] = (n.situations[situation] ?: 0.0) + w
+        n.situations.keys.filter { n.situations.getValue(it) < 0.02 }.forEach { n.situations.remove(it) }
+    }
+
+    /**
+     * The relationship, once the turns that asked it keep answering the same: [SITUATION_ASKED]
+     * answers, [SITUATION_SHARE] of them the same one. The question then goes unasked (it is a
+     * fifth of each first request, and its eight options a good part of the answer), and is
+     * asked again every [SITUATION_RECHECK] turns, so a friendship that turns into more is seen.
+     * Null while it is not settled, or when a recheck is due.
+     */
+    fun steadySituation(n: Norm): String? {
+        if (n.asked < SITUATION_ASKED || n.since >= SITUATION_RECHECK) return null
+        val (top, share) = n.situations.maxByOrNull { it.value } ?: return null
+        return top.takeIf { share >= SITUATION_SHARE }
+    }
+
+    private const val SITUATION_WINDOW = 20
+    private const val SITUATION_ASKED = 5
+    private const val SITUATION_SHARE = 0.75
+    private const val SITUATION_RECHECK = 12
 
     /** Null until a few turns are in. */
     fun normSummary(n: Norm): String? {
@@ -767,6 +820,13 @@ object Person {
     fun mergeNorm(into: Norm, from: Norm) {
         val total = into.turns + from.turns
         if (from.turns == 0) return
+        if (into.asked + from.asked > 0) {
+            val b = into.asked.toDouble() / (into.asked + from.asked)
+            for (k in (into.situations.keys + from.situations.keys).toSet())
+                into.situations[k] = (into.situations[k] ?: 0.0) * b + (from.situations[k] ?: 0.0) * (1 - b)
+            into.asked += from.asked
+            into.since = minOf(into.since, from.since)
+        }
         if (into.turns == 0) { into.turns = from.turns; into.danger = from.danger; into.intents.putAll(from.intents); return }
         val a = into.turns.toDouble() / total
         into.danger = into.danger * a + from.danger * (1 - a)
@@ -775,18 +835,24 @@ object Person {
     }
 
     fun saveNorm(n: Norm): String =
-        "${n.turns}\t${n.danger}\t" + n.intents.entries.joinToString("|") { "${it.key}=${it.value}" }
+        "${n.turns}\t${n.danger}\t" + shares(n.intents) + "\t" + shares(n.situations) + "\t${n.asked}\t${n.since}"
+
+    private fun shares(m: Map<String, Double>): String = m.entries.joinToString("|") { "${it.key}=${it.value}" }
 
     fun loadNorm(text: String): Norm {
         val p = text.split('\t')
         if (p.size < 2) return Norm()
-        val intents = LinkedHashMap<String, Double>()
-        p.getOrNull(2)?.split('|')?.forEach { kv ->
-            val k = kv.substringBeforeLast('=', "")
-            val v = kv.substringAfterLast('=', "").toDoubleOrNull()
-            if (k.isNotBlank() && v != null) intents[k] = v
+        fun shares(s: String?): LinkedHashMap<String, Double> {
+            val out = LinkedHashMap<String, Double>()
+            s?.split('|')?.forEach { kv ->
+                val k = kv.substringBeforeLast('=', "")
+                val v = kv.substringAfterLast('=', "").toDoubleOrNull()
+                if (k.isNotBlank() && v != null) out[k] = v
+            }
+            return out
         }
-        return Norm(p[0].toIntOrNull() ?: 0, p[1].toDoubleOrNull() ?: 0.0, intents)
+        return Norm(p[0].toIntOrNull() ?: 0, p[1].toDoubleOrNull() ?: 0.0, shares(p.getOrNull(2)),
+            shares(p.getOrNull(3)), p.getOrNull(4)?.toIntOrNull() ?: 0, p.getOrNull(5)?.toIntOrNull() ?: 0)
     }
 
     // ---- what happened before ----
@@ -797,9 +863,9 @@ object Person {
 
     fun push(history: List<Turn>, t: Turn): List<Turn> = (history + t).takeLast(HISTORY)
 
-    fun historySummary(history: List<Turn>): String? {
+    fun historySummary(history: List<Turn>, n: Int = 5): String? {
         if (history.isEmpty()) return null
-        return history.takeLast(5).joinToString(L.t("；", "; ")) {
+        return history.takeLast(n).joinToString(L.t("；", "; ")) {
             L.t("${it.intent}/危${it.danger}/${it.action}", "${L.label(it.intent)} / risk ${it.danger} / ${L.label(it.action)}")
         }
     }

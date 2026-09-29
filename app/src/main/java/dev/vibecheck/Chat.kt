@@ -565,6 +565,17 @@ object Chat {
     }
 
     /**
+     * Scrolled up into what was already counted: the newest counted line (the end of [tail]) is
+     * below the screen, which shows only older ones. Not when nothing lines up, nor with nothing
+     * counted, so a chat never judged before is judged.
+     */
+    fun scrolledBack(tail: List<Pair<String, String>>, page: List<Pair<String, String>>): Boolean {
+        if (tail.isEmpty() || page.isEmpty()) return false
+        val end = alignEnd(tail, page) ?: return false
+        return end >= page.size
+    }
+
+    /**
      * A history read leaves the chat scrolled far up. Is this page past that history again? Yes
      * once the newest counted message (the end of [tail]) is on screen, or once the page lines up
      * with neither what was counted nor what was [read]: then it is something new, like a burst

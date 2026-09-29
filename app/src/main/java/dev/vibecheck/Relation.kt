@@ -108,13 +108,27 @@ object Relation {
     fun summary(s: Stats): String? {
         val total = s.theirMsgs + s.myMsgs
         if (total < 6) return null
-        val parts = ArrayList<String>()
-
-        parts.add(L.t("共看到 $total 条（对方 ${s.theirMsgs}，我 ${s.myMsgs}）", "$total messages seen (them ${s.theirMsgs}, me ${s.myMsgs})"))
         val theirAvg = if (s.theirMsgs > 0) s.theirChars / s.theirMsgs else 0
         val myAvg = if (s.myMsgs > 0) s.myChars / s.myMsgs else 0
-        parts.add(L.t("平均长度 对方 $theirAvg 字 / 我 $myAvg 字", "avg length them $theirAvg / me $myAvg chars"))
+        val parts = listOf(
+            L.t("共看到 $total 条（对方 ${s.theirMsgs}，我 ${s.myMsgs}）", "$total messages seen (them ${s.theirMsgs}, me ${s.myMsgs})"),
+            L.t("平均长度 对方 $theirAvg 字 / 我 $myAvg 字", "avg length them $theirAvg / me $myAvg chars"),
+        ) + patterns(s)
+        return parts.joinToString(L.t("；", "; "))
+    }
 
+    /**
+     * The long run for the judge: who opens, how fast I answer, how many turns went badly, on how
+     * many days we talked. Not the counts of messages and their lengths, which change with every
+     * message (and so every request) and tell one turn nothing that how they write does not.
+     */
+    fun judgeSummary(s: Stats): String? {
+        if (s.theirMsgs + s.myMsgs < 6) return null
+        return patterns(s).joinToString(L.t("；", "; ")).ifEmpty { null }
+    }
+
+    private fun patterns(s: Stats): List<String> {
+        val parts = ArrayList<String>()
         if (s.sessions >= 2) {
             val pct = s.theyStarted * 100 / s.sessions
             parts.add(
@@ -130,7 +144,7 @@ object Relation {
             parts.add(L.t("判断过 ${s.friction + s.calm} 轮，其中 ${s.friction} 轮是高风险", "${s.friction + s.calm} turns judged, ${s.friction} high-risk"))
         }
         if (s.daysSeen >= 2) parts.add(L.t("有 ${s.daysSeen} 天聊过", "chatted on ${s.daysSeen} days"))
-        return parts.joinToString(L.t("；", "; "))
+        return parts
     }
 
     fun fmtDuration(sec: Long): String = when {

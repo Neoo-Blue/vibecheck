@@ -777,7 +777,11 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             inFlight = null
             quietFor = null
         }
-        val read = if (heldFor == id && !forceJudge) null
+        // Scrolled up to read what came before: that screen is not the turn to answer, and the card
+        // keeps the reading of the newest one. Each screen of history on the way up used to be
+        // judged, and the newest turn again on the way back down.
+        val back = prefs.passive && name != UNKNOWN && Chat.scrolledBack(record.tail, bubbles.map { (if (it.incoming) "对方" else "我") to it.text })
+        val read = if ((heldFor == id || back) && !forceJudge) null
             else Chat.triggerKey(bubbles) ?: (if (forceJudge) Chat.anyKey(bubbles) else null)
         val known = verdicts[id]
         // Read by OCR, the same messages can come out a character apart from one frame to the
@@ -873,25 +877,26 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         val transcript = Chat.transcript(bubbles)
         val background = people.background(record, prefs.context)
         val basis = basisOf(record)
-        val style = Person.styleSummary(record.style)
-        val history = Person.historySummary(record.history)
-        val relation = Relation.summary(record.stats)
+        // The judge reads their turn: how I write stays with the drafts, and of the long run and
+        // how they write only what a turn is read against, not counts that move with every
+        // message. The last three turns, not five, for where things are going.
         val state = Jev.stateJson(
             context = background,
             transcript = transcript,
             peer = record.alias.ifBlank { record.name }.takeUnless { it == UNKNOWN || Person.isFingerprint(it) },
-            style = style,
-            history = history,
-            relation = relation,
+            history = Person.historySummary(record.history, 3),
+            relation = Relation.judgeSummary(record.stats),
             source = if (ocr) OCR_CAVEAT else null,
             relationship = rel,
             closeness = close,
             // What is normal for this person, learned message by message and turn by turn: the
             // reading of each turn gets more theirs the longer you talk.
-            theirStyle = Person.theirStyleSummary(record.theirStyle),
+            theirStyle = Person.theirTraits(record.theirStyle),
             usual = Person.normSummary(record.norm),
         )
-        val triageBody = Jev.triageBody(state, askSituation = rel == null)
+        // Not known, but answered the same turn after turn: not asked again for a while.
+        val steady = if (rel == null) Person.steadySituation(record.norm) else null
+        val triageBody = Jev.triageBody(state, askSituation = rel == null && steady == null)
         // This record copy is not touched again (the answer is applied to a fresh load), so the
         // judge thread may read its model.
         val model = if (prefs.learning) record.model else Learner.Model()
@@ -908,7 +913,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             // Routed on the danger this person's history calibrates to, not the raw reading.
             val routine = triage.mapCatching { Jev.isRoutine(calibrated(it, model)) }.getOrDefault(false)
             // No situation answer at all still gets the default set, not a two-block card.
-            val situation = rel ?: triage.getOrNull()?.let { (it["situation"] as? Jev.Answer.Dist)?.top } ?: ""
+            val situation = rel ?: steady ?: triage.getOrNull()?.let { (it["situation"] as? Jev.Answer.Dist)?.top } ?: ""
             val merged = triage.mapCatching { t ->
                 if (routine) t else {
                     prefs.countUse(Prefs.USE_JUDGE)
@@ -1108,7 +1113,13 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         if (before == null) Relation.judged(record.stats, calibrated)
         // What is usual for them moves with every new turn (not with a second reading of one),
         // on Jev's own reading, so the next turn is read against how they usually come across.
-        if (before == null) Person.observeNorm(record.norm, intent, rawNorm)
+        if (before == null) {
+            Person.observeNorm(record.norm, intent, rawNorm)
+            // The relationship as this turn answered it, when it was asked (see Person.steadySituation).
+            val asked = (raw["situation"] as? Jev.Answer.Dist)?.top
+            if (asked != null) Person.observeSituation(record.norm, asked)
+            else if (Relationship.pinned(record.rel) == null) record.norm.since++
+        }
         var adjusted = false
         var recorded = false
         (raw["action"] as? Jev.Answer.Dist)?.let { dist ->
@@ -2669,9 +2680,8 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         }
 
         private const val OCR_CAVEAT =
-            "这段对话是从手机屏幕识别出来的文字，表情符号和表情包图片读不到，" +
-            "所以看起来平淡的一句话，实际可能带着表情。缺的内容不要当成对方没有情绪。" +
-            "个别字也可能被认成了形近字，读不通的地方按上下文理解。"
+            "从屏幕识别的文字：表情和表情包读不到，看似平淡的话可能带着表情，缺的内容别当成没情绪；" +
+            "个别字可能认成了形近字，读不通时按上下文理解。"
 
         /**
          * The Wi-Fi IPv4, for showing the troubleshooting URL in the app. Picking the first
