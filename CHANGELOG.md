@@ -1,8 +1,20 @@
 # Changelog
 
-APKs for every version are on the [releases page](https://github.com/Neoo-Blue/vibecheck/releases).
-Each section below is also that release's notes: the Release workflow publishes the section whose
-heading matches the tag.
+The newest APK is on the [releases page](https://github.com/Neoo-Blue/vibecheck/releases); earlier
+releases were taken down with 6.9.4. Each section below is also that version's notes: the Release
+workflow publishes the section whose heading matches the tag.
+
+## 6.9.4
+
+- **A name a little lower in the title bar is read.**
+  - In apps that give the screen as text (Soul, WhatsApp, Messenger), a name only counted when its
+    top started above 7% of the screen's height.
+  - In a Soul chat with someone you don't follow yet, the title bar is taller. On a tall screen
+    the name sat just below that line, so the chat went as someone unknown (「认不出是谁」), with
+    nothing kept for them.
+  - A name now counts by where its middle sits in the title bar, as it already did where the
+    screen is read by OCR.
+  - Soul's hint beside the follow button (「关注后可邀请通话」) is never a name.
 
 ## 6.9.3
 

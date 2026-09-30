@@ -29,6 +29,23 @@ class LabelTest {
         assertEquals("...", Person.peerName(listOf(at("...", 640, 800), at("1分钟前", 600, 840, 270, 320)), emptyList(), win, symbols = true))
     }
 
+    @Test fun aNameLowInATallTitleBarIsStillTheName() {
+        // Soul, in a chat with someone not followed yet: the back button's count, the name a little
+        // more than 7% down, the follow button, and a hint under it.
+        val texts = listOf(
+            at("37", 100, 180, 222, 292),
+            at("李四", 216, 345, 222, 292),
+            at("关注", 1110, 1270, 205, 305),
+            at("关注后可邀请通话", 1036, 1296, 318, 356),
+        )
+        val titles = texts.filter { Chat.inTitleBar(it.second, win) }
+        assertEquals("李四", Person.peerName(titles, emptyList(), win, symbols = true))
+        assertTrue(Person.isLabel("关注后可邀请通话"))
+        // Not the status bar above it, nor a message under the bar.
+        assertFalse(Chat.inTitleBar(Chat.Box(60, 40, 200, 100), win))
+        assertFalse(Chat.inTitleBar(Chat.Box(200, 380, 700, 460), win))
+    }
+
     @Test fun aScreenTitledAsTheAppsOwnIsNotAChat() {
         assertTrue(Person.notAChat(listOf(at("Moments", 560, 880))))
         assertTrue(Person.notAChat(listOf(at("相机胶卷 ▾", 560, 880))))

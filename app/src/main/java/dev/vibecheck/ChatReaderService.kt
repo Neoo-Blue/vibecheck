@@ -614,8 +614,6 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         val dp = resources.displayMetrics.density
         var input: Chat.Box? = null
         val h = win.bottom - win.top
-        val statusBar = win.top + h * 0.035
-        val titleBand = win.top + h * 0.07
 
         val stack = ArrayDeque<AccessibilityNodeInfo>()
         stack.addLast(root)
@@ -646,7 +644,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                 val box = Chat.Box(r.left, r.top, r.right, r.bottom)
                 texts.add(text to box)
                 longClick.add(n.isLongClickable)
-                if (box.top >= statusBar && box.top <= titleBand) titles.add(text to box)  // name band
+                if (Chat.inTitleBar(box, win)) titles.add(text to box)
             } else if (text.isEmpty() && ("Image" in cls || "Avatar" in cls || n.contentDescription?.endsWith("头像") == true)) {
                 val r = Rect().also { n.getBoundsInScreen(it) }
                 val box = Chat.Box(r.left, r.top, r.right, r.bottom)
