@@ -154,17 +154,3 @@ jobs:
             { cat want.md; tail -n +"$SEP" body.md; } > notes.md
             gh release edit "$TAG" --notes-file notes.md && echo "The notes of $TAG follow the changelog again."
           done
-
-      - name: Earlier releases go (once, with 6.9.4)
-        # Asked for once: with 6.9.4 out, every earlier release goes, with its tag, and so do tags
-        # left without a release. Only on the run that publishes 6.9.4; taken out again after.
-        if: steps.plan.outputs.skip != 'true' && env.VERSION == '6.9.4'
-        run: |
-          for OLD in $(gh release list --limit 500 --json tagName --jq '.[].tagName'); do
-            [ "$OLD" = "$TAG" ] && continue
-            gh release delete "$OLD" --yes --cleanup-tag && echo "Took down $OLD."
-          done
-          for OLD in $(git ls-remote --tags origin | sed -n 's|.*refs/tags/\([^^]*\)$|\1|p' | sort -u); do
-            [ "$OLD" = "$TAG" ] && continue
-            git push origin --delete "refs/tags/$OLD" && echo "Deleted the tag $OLD."
-          done
