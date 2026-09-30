@@ -1,8 +1,8 @@
 # Changelog
 
-APKs for every version are on the [releases page](https://github.com/Neoo-Blue/vibecheck/releases).
-Each section below is also that release's notes: the Release workflow publishes the section whose
-heading matches the tag.
+The newest APK is on the [releases page](https://github.com/Neoo-Blue/vibecheck/releases); earlier
+releases were taken down with 6.9.4. Each section below is also that version's notes: the Release
+workflow publishes the section whose heading matches the tag.
 
 ## 6.9.4
 
