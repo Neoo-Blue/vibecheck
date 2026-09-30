@@ -122,7 +122,7 @@ class PersonStore(ctx: Context) {
             model = Learner.load(sp.getString("$id:learn", "") ?: ""),
             history = Person.loadHistory(sp.getString("$id:hist", "") ?: ""),
             stats = Relation.load(sp.getString("$id:stats", "") ?: ""),
-            tail = Archive.withoutQuotes(Archive.withoutStrips(Person.loadTail(sp.getString("$id:tail", "") ?: "")), quoteNames(own), emojiNamed(own)),
+            tail = Archive.withoutQuotes(Archive.withoutCard(Archive.withoutStrips(Person.loadTail(sp.getString("$id:tail", "") ?: ""))), quoteNames(own), emojiNamed(own)),
             legacySeen = sp.getString("$id:seen", "") ?: "",
             bio = bio,
             learned = sp.getInt("$id:learned", 0),
@@ -432,8 +432,9 @@ class PersonStore(ctx: Context) {
         runCatching {
             file(own).takeIf { it.exists() }?.readText()?.let { text ->
                 // Kept before they were known not to be messages: call records (「已取消」, "Canceled O"),
-                // voice lengths, and quotes kept as the replier's own words.
-                Archive.withoutQuotes(Archive.withoutStrips(Archive.decode(text)), quoteNames(own), emojiNamed(own))
+                // voice lengths, Soul's quick replies and its card of the other person, and quotes
+                // kept as the replier's own words.
+                Archive.withoutQuotes(Archive.withoutCard(Archive.withoutStrips(Archive.decode(text))), quoteNames(own), emojiNamed(own))
                     .filterNot { Chat.isNotification(it.second) }
             }
         }.getOrNull() ?: emptyList()
