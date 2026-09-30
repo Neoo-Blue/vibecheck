@@ -81,7 +81,10 @@ object Chat {
             """$ACTOR pinned a message|$ACTOR started a (video |voice )?(call|huddle)|""" +
             """$ACTOR took a screenshot( of (the|this) (chat|conversation))?|""" +
             """$ACTOR reacted to (your|their|a|an|his|her|this) (message|story|photo|video|note|comment|post)|""" +
-            """$ACTOR accepted (the|your) (message )?request)""" +
+            """$ACTOR accepted (the|your) (message )?request|""" +
+            // Soul: the hint under its follow button, and the etiquette score on the card of the
+            // other person at the top of a new chat (see [profileCard]).
+            """关注后可邀请(语音|视频)?通话|礼仪分\s*[：:][^?？]{0,24})""" +
             // Trailing metadata only: "· 12 min", " at 10:32", " 03:12". Not ", then dinner" or " at 8 tonight".
             """(\s*[·•|]\s*[^?？]{0,40}|\s+(at|on)\s+$CLOCK|\s+$CLOCK)?[.!。]?""",
         RegexOption.IGNORE_CASE,
@@ -145,18 +148,74 @@ object Chat {
 
     /**
      * Which of the texts on screen are messages: not chrome on their own ([isChrome]), not in a
-     * row of texts side by side ([sideBySide]), and above the reply box when it is known.
+     * row of texts side by side ([sideBySide]) nor under one along the bottom ([underStrip]), not
+     * on the card of the other person ([profileCard]), and above the reply box when it is known.
      * Everything from the top of the reply box down is the compose area (a send button drawn as
      * text, a hint), wherever the keyboard has pushed it.
      */
     fun messageIndices(items: List<Pair<String, Box>>, win: Box, input: Box? = null): List<Int> {
         val strip = sideBySide(items)
+        val compose = underStrip(items, strip, win)
         val quoted = repliedTo(items, win)
+        val card = profileCard(items, win)
         return items.indices.filter { i ->
             val (text, box) = items[i]
-            i !in strip && i !in quoted && !isChrome(box, text, win) && (input == null || (box.top + box.bottom) / 2 < input.top)
+            i !in strip && i !in compose && i !in quoted && i !in card && !isChrome(box, text, win) &&
+                (input == null || (box.top + box.bottom) / 2 < input.top)
         }
     }
+
+    /**
+     * What is under a strip along the bottom ([strip], from [sideBySide]): the reply box, and the
+     * hint in it while it is empty, where Soul suggests an opening line. A screen read by OCR has
+     * no text field to tell the hint from a message by, and with the keyboard down no reply box
+     * to go by: the hint was their newest message. Only texts wholly below the strip and in the
+     * last tenth of the window go, so a message under a row of reactions stays.
+     */
+    fun underStrip(items: List<Pair<String, Box>>, strip: Set<Int>, win: Box): Set<Int> {
+        val h = win.bottom - win.top
+        val floor = strip.map { items[it].second }.filter { (it.top + it.bottom) / 2 > win.top + h * 0.7 }
+            .maxOfOrNull { it.bottom } ?: return emptySet()
+        return items.indices.filterTo(HashSet()) { i ->
+            val box = items[i].second
+            i !in strip && box.top >= floor - 2 && (box.top + box.bottom) / 2 > win.top + h * 0.9
+        }
+    }
+
+    /**
+     * Soul's card of the other person, at the top of a chat that has just started: their planet
+     * (「小猫星球」), star sign, and etiquette score (「礼仪分：[赞]良好」). Read as messages they
+     * were things they had said: the profile listed them among their words, and a reply praised
+     * them for their score. The score says it is the card, and goes as a notice
+     * ([isNotification]); a star sign, planet or age goes with it when it is close by. A star sign
+     * anywhere else is kept: 「天秤座」 is also what someone answers to "what's your sign".
+     */
+    fun profileCard(items: List<Pair<String, Box>>, win: Box): Set<Int> {
+        val scores = items.filter { isCardScore(it.first) }.map { (it.second.top + it.second.bottom) / 2 }
+        if (scores.isEmpty()) return emptySet()
+        val near = (win.bottom - win.top) * CARD_NEAR
+        return items.indices.filterTo(HashSet()) { i ->
+            val (text, box) = items[i]
+            isCardField(text) && scores.any { abs(it - (box.top + box.bottom) / 2) <= near }
+        }
+    }
+
+    /** How close to the score, as a share of the window's height, the rest of the card is. */
+    private const val CARD_NEAR = 0.15
+
+    /** The etiquette score line of Soul's card of the other person (see [profileCard]). */
+    fun isCardScore(text: String): Boolean = CARD_SCORE.matches(text.trim())
+
+    /** What else is on that card: a star sign, a planet, an age, or a few of those on one line. */
+    fun isCardField(text: String): Boolean = CARD_FIELD.matches(text.trim())
+
+    /** Not a question about it: 「礼仪分：多少？」. */
+    private val CARD_SCORE = Regex("""礼仪分\s*[：:][^?？]{0,24}""")
+    private const val SIGN = """(白羊|金牛|双子|巨蟹|狮子|处女|天秤|天蝎|射手|摩羯|水瓶|双鱼)座"""
+    /** Not a question about one: 「哪个星球」「什么星球」. */
+    private const val PLANET = """((?!哪|什么|啥)[\p{L}\p{N}]){1,10}星球"""
+    private const val AGE = """\d{1,2}岁"""
+    private val CARD_FIELD = Regex("""($SIGN|$PLANET|$AGE)(\s*[·•|/、]?\s*($SIGN|$PLANET|$AGE))*""")
 
     /**
      * Messenger and Instagram put the message a reply answers right under "Sam replied to you" /
@@ -192,6 +251,11 @@ object Chat {
      * side by side are never messages. Read as messages, Soul's strip was the newest thing "they"
      * said, and the replies answered 「下午好」. A time or delivery mark beside a message
      * ("ok 10:32") is not counted toward a row.
+     *
+     * Two of the strip's own labels side by side are one too ([CHIP_LABELS]), and so is a text
+     * made of them ([isChipRun]): OCR took 「晚上好」「交换答案」 as one block of text and
+     * 「桌球」「礼物」 as another, two texts that a row of three never saw, and they were a message
+     * of theirs and one of mine.
      */
     fun sideBySide(items: List<Pair<String, Box>>): Set<Int> {
         // The node tree repeats nodes: rows are made of distinct texts, and every copy goes.
@@ -206,16 +270,50 @@ object Chat {
         }
         val strip = HashSet<Pair<String, Box>>()
         for (r in rows) {
-            if (r.size < 3) continue
+            if (r.size < 2 || (r.size == 2 && !isChipRun(r.joinToString(" ") { it.first }))) continue
             // Side by side, not one inside another.
             val byLeft = r.sortedBy { it.second.left }
             if (byLeft.zipWithNext().all { (a, b) -> b.second.left >= a.second.right - 2 }) strip += r
         }
-        return items.indices.filterTo(HashSet()) { items[it] in strip }
+        return items.indices.filterTo(HashSet()) { items[it] in strip || isChipRun(items[it].first) }
     }
 
     /** Longer than this is a sentence, not a chip. */
     private const val STRIP_CHARS = 16
+
+    /**
+     * What Soul's strip above the reply box offers: games and gifts to send, and a greeting for
+     * the time of day. Seen as 「下午好」「礼物」「桌球」「比心」「猜拳」, and as 「晚上好」
+     * 「交换答案」「桌球」「礼物」.
+     */
+    val CHIP_GAMES = setOf("礼物", "桌球", "比心", "猜拳", "骰子", "交换答案")
+    val CHIP_LABELS = CHIP_GAMES + setOf("早上好", "早安", "上午好", "中午好", "下午好", "晚上好", "晚安")
+
+    /**
+     * Is [text] a run of the strip's labels: two or more different ones, with a game or a gift
+     * among them, and nothing else but spaces and what OCR makes of their icons (a mark, a digit,
+     * a Latin letter before a label)? 「晚上好 交换答案」, 「8 桌球 礼物」 and 「桌球礼物」 are.
+     * 「晚安 晚安」, 「晚安 比心」 (which people send), 「送礼物比心」 and one label alone are not.
+     */
+    fun isChipRun(text: String): Boolean {
+        val s = text.filter { it.isLetter() }
+        if (s.length < 4 || s.length > 24) return false
+        val labels = ArrayList<String>()
+        var i = 0
+        while (i < s.length) {
+            if (labelAt(s, i) == null && s[i].lowercaseChar() in 'a'..'z') i++
+            val l = labelAt(s, i) ?: return false
+            labels += l
+            i += l.length
+        }
+        return labels.distinct().size >= 2 && labels.any { it in CHIP_GAMES && it != HEART }
+    }
+
+    /** The longest of the strip's labels that [s] has at [i]. */
+    private fun labelAt(s: String, i: Int): String? = CHIP_LABELS.filter { s.startsWith(it, i) }.maxByOrNull { it.length }
+
+    /** A label of the strip that people also send, after a greeting: 「晚安比心」. */
+    private const val HEART = "比心"
 
     /** Two boxes on one line: most of the shorter one's height is shared. */
     private fun sameRow(a: Box, b: Box): Boolean {
@@ -464,6 +562,23 @@ object Chat {
         }
         return tabs >= 2
     }
+
+    /**
+     * A party room rather than a chat: Soul's voice rooms, games of pool among them, put the
+     * host's name where a chat has its title, the room's number under it, and a button to take the
+     * mic along the bottom. Judged as a chat, the host was a new person, and the room's broadcasts
+     * (who won what in a draw) were their messages.
+     */
+    fun looksLikeRoom(items: List<Pair<String, Box>>, win: Box): Boolean {
+        val h = (win.bottom - win.top).coerceAtLeast(1)
+        return items.any { (text, box) ->
+            val t = text.trim()
+            (t in MIC_BUTTONS && box.top > win.top + h * 0.9) || (ROOM_NUMBER.matches(t) && inTitleBar(box, win))
+        }
+    }
+
+    private val MIC_BUTTONS = setOf("上麦", "下麦", "排麦", "申请上麦")
+    private val ROOM_NUMBER = Regex("""FM\s?\d{5,}""", RegexOption.IGNORE_CASE)
 
     /**
      * WeChat message bubbles are long-clickable (copy/recall menu); nicknames, timestamps and

@@ -144,6 +144,8 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     private var lastLetterName: String? = null
     private var viaOcr = false
     private var onHomeScreen = false
+    /** The last read was of a party room, not a chat (Chat.looksLikeRoom). */
+    private var inRoom = false
     private var hasInput = false
     private var lastProbe = 0L
     /** When the last screenshot was asked for (uptime): see [captureChat]. */
@@ -444,6 +446,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         if (!targetOnScreen()) { leaveChat("not a watched chat on screen"); return }
         hasInput = false
         onHomeScreen = false
+        inRoom = false
         val root = rootFor(targetPkg)
         val bubbles = if (root == null) emptyList() else try { collect(root) } catch (e: Exception) {
             Diag.lastError = "collect: ${e.message}"; Diag.log(Diag.lastError); emptyList()
@@ -577,6 +580,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                 // Another app came up while the picture was read: it is not this chat.
                 if (!targetOnScreen()) { leaveChat("left while reading the screen"); return@read }
                 onHomeScreen = Chat.looksLikeHomeScreen(placed, win)
+                inRoom = Chat.looksLikeRoom(placed, win)
                 hasInput = false
                 lastAvatarHash = older
                 lastAvatarInside = inside
@@ -663,6 +667,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         // A text field along the bottom is a reply box, which a chat has and a chat list does not.
         hasInput = input?.let { it.top > win.top + h * 0.6 } ?: false
         onHomeScreen = Chat.looksLikeHomeScreen(texts, win)
+        inRoom = Chat.looksLikeRoom(texts, win)
         lastCounts = L.t(
             "${root.packageName ?: "?"}：节点 $visited，带文字的 TextView ${texts.size}，过滤后 ${found.size}",
             "${root.packageName ?: "?"}: $visited nodes, ${texts.size} text views, ${found.size} after filtering",
@@ -682,8 +687,8 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         emptyReads = 0
         // The chat list is also full of names and text; judging it would be nonsense.
         // Nor is a screen of the app titled as one (Moments, an official account, the photo
-        // picker): its title was kept as a person.
-        if (onHomeScreen || !Chat.inConversation(read, hasInput) || Person.notAChat(lastTitles)) {
+        // picker): its title was kept as a person. Nor a party room, named after its host.
+        if (onHomeScreen || inRoom || !Chat.inConversation(read, hasInput) || Person.notAChat(lastTitles)) {
             activeId = null
             card.hide()
             return

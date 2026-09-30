@@ -1,6 +1,7 @@
 package dev.vibecheck
 
 import java.security.MessageDigest
+import kotlin.math.abs
 
 /**
  * The whole history with one person, kept on the phone once they have been learned: what the
@@ -52,16 +53,22 @@ object Archive {
      * Lines that were never messages: Soul's strip of quick replies above the reply box
      * (「下午好」「礼物」「桌球」「比心」「猜拳」), which versions up to 6.7.1 read as messages and
      * kept. Only a run of three or more of its labels in a row goes, at least half of them and at
-     * least two different ones the non-greeting labels: nobody sends that.
+     * least two different ones the non-greeting labels: nobody sends that. So does a line made of
+     * its labels (Chat.isChipRun), as OCR read the strip up to 6.9.4: 「晚上好 交换答案」.
      */
     fun withoutStrips(lines: List<Pair<String, String>>): List<Pair<String, String>> {
         var drop: BooleanArray? = null
         var i = 0
         while (i < lines.size) {
+            if (Chat.isChipRun(lines[i].second)) {
+                (drop ?: BooleanArray(lines.size).also { drop = it })[i] = true
+                i++
+                continue
+            }
             var j = i
-            while (j < lines.size && lines[j].second.trim() in STRIP_LABELS) j++
+            while (j < lines.size && lines[j].second.trim() in Chat.CHIP_LABELS) j++
             if (j - i >= 3) {
-                val games = (i until j).map { lines[it].second.trim() }.filter { it in STRIP_GAMES }
+                val games = (i until j).map { lines[it].second.trim() }.filter { it in Chat.CHIP_GAMES }
                 if (games.distinct().size >= 2 && games.size * 2 >= j - i) {
                     val d = drop ?: BooleanArray(lines.size).also { drop = it }
                     for (k in i until j) d[k] = true
@@ -72,6 +79,21 @@ object Archive {
         val d = drop ?: return lines
         return lines.filterIndexed { k, _ -> !d[k] }
     }
+
+    /**
+     * Soul's card of the other person, kept up to 6.9.4 as messages of theirs from the top of a
+     * new chat (see Chat.profileCard): the etiquette score line, and a star sign, planet or age
+     * within [CARD_LINES] lines of it.
+     */
+    fun withoutCard(lines: List<Pair<String, String>>): List<Pair<String, String>> {
+        val scores = lines.indices.filter { Chat.isCardScore(lines[it].second) }
+        if (scores.isEmpty()) return lines
+        return lines.filterIndexed { k, (_, text) ->
+            k !in scores && !(Chat.isCardField(text) && scores.any { abs(it - k) <= CARD_LINES })
+        }
+    }
+
+    private const val CARD_LINES = 3
 
     /**
      * Quotes kept as if they were messages, by versions that read a quote as the replier's words:
@@ -93,9 +115,6 @@ object Archive {
 
     /** How far back a quote's message is looked for. */
     private const val LOOK_BACK = 80
-
-    private val STRIP_GAMES = setOf("礼物", "桌球", "比心", "猜拳", "骰子")
-    private val STRIP_LABELS = STRIP_GAMES + setOf("早上好", "上午好", "中午好", "下午好", "晚上好", "晚安")
 
     // ---- joining a history read onto what is kept ----
 

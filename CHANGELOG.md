@@ -4,6 +4,34 @@ The newest APK is on the [releases page](https://github.com/Neoo-Blue/vibecheck/
 releases were taken down with 6.9.4. Each section below is also that version's notes: the Release
 workflow publishes the section whose heading matches the tag.
 
+## 6.9.5
+
+- **Soul's quick replies are no longer read as messages, however the screen is read.**
+  - Where Soul's screen is read by OCR, two neighbouring replies could come out as one text
+    (「晚上好 交换答案」, 「桌球 礼物」). Two texts were too few for a row of three, so they were
+    read as a message of theirs and one of mine: learned into the profile as how each of you
+    writes, and answered in drafts.
+  - A text made of the strip's labels, or two of them side by side, is now the strip.
+    「交换答案」 is one of its labels.
+  - A greeting with a heart (「晚安 比心」) is still a message.
+  - Kept history loses those lines when it is read, so rewriting a profile (People → the person →
+    Rewrite the profile, 重新分析) leaves them out.
+- **The hint in Soul's empty reply box is not their newest message.** Read by OCR with the
+  keyboard down, the suggested opening line under the strip counted as a message of theirs.
+- **Soul's 「关注后可邀请通话」 under the follow button is not a message of mine.**
+- **Soul's card of the other person at the top of a new chat is not their words.**
+  - Their planet, star sign and etiquette score (「礼仪分：…」) were read as things they said:
+    the profile listed them, and a draft praised the score.
+  - The score line goes, and a star sign, planet or age close to it. A star sign sent as an answer
+    stays.
+  - Kept history loses them too.
+- **Soul's party rooms are not chats.**
+  - A room (a voice room, a game of pool) shows the host's name where a chat has its title, a
+    room number under it, and a mic button (上麦) along the bottom.
+  - It was judged as a chat with the host, and the room's broadcasts as their messages.
+  - No card there now, and the host is not kept as a person. Someone kept from a room before can
+    be removed under People → the person → Forget this person (忘记这个人).
+
 ## 6.9.4
 
 - **A name a little lower in the title bar is read.**

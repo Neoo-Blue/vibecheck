@@ -433,9 +433,14 @@ with what is actually on screen.
   drafts see up to 30, taking the lines before the screen from the saved history of people you
   have learned. A whole history is read and kept only for people you learn.
 - Not messages, whatever they say: a row of short texts side by side (Soul's quick replies
-  下午好 / 礼物 / 桌球 / 比心 / 猜拳 above the reply box, toolbars, reactions), anything at or below
-  the reply box (a send button, the draft being typed, wherever the keyboard has pushed it), and
-  what sits in the title bar (the unread count on the back button, Soul's 加速).
+  下午好 / 礼物 / 桌球 / 比心 / 猜拳 / 交换答案 above the reply box, toolbars, reactions), also when
+  OCR runs two of those replies into one text, anything at or below the reply box (a send button,
+  the draft being typed, the hint in an empty reply box, wherever the keyboard has pushed it), and
+  what sits in the title bar (the unread count on the back button, Soul's 加速, the hint under its
+  follow button). Nor is Soul's card of the other person at the top of a new chat (their planet,
+  star sign and etiquette score).
+- Soul's party rooms (voice rooms, games of pool) are not chats: no card there, and the host is
+  not kept as a person.
 - Learning reads what the chat shows as text: pictures, stickers, voice messages and files are
   not in it, and a long run of them can look like the top of the history and end the read early
   (tap Learn again; it continues). WeChat's own search and dates are not used, so the kept history
