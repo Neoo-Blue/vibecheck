@@ -286,20 +286,25 @@ object Chat {
         dp: Float = 2.75f,
         seen: (Box) -> Int = { Sides.UNKNOWN },
     ): Pair<List<Bubble>, List<Pair<String, Box>>> {
-        val h = (win.bottom - win.top)
-        // Below the status bar, where the clock and icons live and OCR turns those into
-        // convincing-looking garbage, and centred above the end of the title bar. The box OCR
-        // gives is only as tall as the letters: a name in small letters ("anna") starts lower in
-        // the bar than 「小雨」 or "Ken". Taken by where its top was, it once fell just outside
-        // (7.1% down a 1440 x 3120 screen), and the chat went as one whose name is an emoji.
-        val titles = items.filter {
-            it.second.top >= win.top + h * 0.035 && (it.second.top + it.second.bottom) / 2 < win.top + h * TITLE_END
-        }
+        val titles = items.filter { inTitleBar(it.second, win) }
         val visible = items.filterNot { item -> exclude.any { overlaps(item.second, it) } }
         val kept = messageIndices(visible, win, input).map { visible[it] }.sortedBy { it.second.top }
         val theirs = sides(kept.map { it.second }, win, dp, seen)
         val bubbles = kept.mapIndexed { i, (text, box) -> Bubble(text, theirs[i], box) }
         return order(bubbles) to titles
+    }
+
+    /**
+     * Is this text in the title bar, where the name is? Below the status bar, where the clock and
+     * icons live (OCR turns those into convincing-looking garbage), and centred above the end of
+     * the bar. By its middle, not its top: a name sits lower in a taller bar, and in a box only
+     * as tall as its letters (OCR's) a name in small letters ("anna") starts lower than 「小雨」.
+     * Taken by where its top was, both fell just outside on a 1440 x 3120 screen, 7.1% and 7.4%
+     * down, and the chat went as one whose name is an emoji, or as someone unknown.
+     */
+    fun inTitleBar(box: Box, win: Box): Boolean {
+        val h = win.bottom - win.top
+        return box.top >= win.top + h * 0.035 && (box.top + box.bottom) / 2 < win.top + h * TITLE_END
     }
 
     /**

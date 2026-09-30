@@ -46,7 +46,9 @@ object Person {
         """(Active .*|Online|last seen.*|typing.*|\d+ (members|participants|subscribers|online).*|""" +
             """tap here for contact info|just now|yesterday|\d+\s*(s|sec|secs|seconds?|m|min|mins|minutes?|h|hr|hrs|hours?|d|days?|w|weeks?)\s+ago|""" +
             """在线|(对方)?正在(输入|讲话|说话).*|最后上线.*|\d+ ?位?成员|刚刚(在线|来过|活跃)|当前在线|近期互动|""" +
-            """\d+\s*(秒|分钟|小时|天|周|个月)前(在线|来过|活跃)?|(今天|昨天|前天)(在线|来过|活跃)|最近在线)""",
+            """\d+\s*(秒|分钟|小时|天|周|个月)前(在线|来过|活跃)?|(今天|昨天|前天)(在线|来过|活跃)|最近在线|""" +
+            // Soul's hints beside the follow button.
+            """关注后.*|互相关注.*|对方已?关注了?你|.*可邀请通话)""",
         RegexOption.IGNORE_CASE,
     )
 
