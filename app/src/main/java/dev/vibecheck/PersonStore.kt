@@ -411,6 +411,7 @@ class PersonStore(ctx: Context) {
             .remove("$id:tail").remove("$id:muted").remove("$id:rel").remove("$id:relset")
             .remove("$id:close").remove("$id:closeset").remove("$id:alias").remove("$id:notes")
             .remove("$id:bio").remove("$id:learned").remove("$id:aliases").remove("$id:tstyle").remove("$id:norm")
+            .remove("$id:learnedat").remove("$id:writtenfrom")
             .putString("index", index().filter { it != id }.joinToString("\n"))
         for (x in aliasesOf(id)) e.remove("link:$x")
         e.apply()
@@ -488,6 +489,17 @@ class PersonStore(ctx: Context) {
         return (listOf(c) + aliasesOf(c)).distinct().sumOf { if (hasArchive(it)) sp.getInt("$it:archived", 0) else 0 }
     }
 
+    /**
+     * How many messages were kept for [id] ([archiveCount]) when their profile was last written:
+     * what a write by itself counts new messages from (Learning.keepUpDue). Null for a profile
+     * written before 6.10.0, whose count of messages learned stands in.
+     */
+    fun writtenFrom(id: String): Int? = canonical(id).let { c -> if (sp.contains("$c:writtenfrom")) sp.getInt("$c:writtenfrom", 0) else null }
+
+    fun setWrittenFrom(id: String, kept: Int) {
+        sp.edit().putInt("${canonical(id)}:writtenfrom", kept).apply()
+    }
+
     /** Written whole, through a temporary file, so a crash cannot leave half a history. */
     fun saveArchive(own: String, lines: List<Pair<String, String>>, complete: Boolean) {
         runCatching {
@@ -510,7 +522,7 @@ class PersonStore(ctx: Context) {
     /** Deletes the kept histories of a person (every linked chat) and the notes written from them. */
     fun deleteArchive(id: String) {
         val c = canonical(id)
-        val e = sp.edit().remove("$c:notes")
+        val e = sp.edit().remove("$c:notes").remove("$c:writtenfrom")
         for (own in (listOf(c) + aliasesOf(c)).distinct()) {
             runCatching { file(own).delete() }
             e.remove("$own:archived").remove("$own:archivedone")

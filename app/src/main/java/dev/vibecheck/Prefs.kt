@@ -71,6 +71,15 @@ class Prefs(ctx: Context) {
         set(v) = sp.edit().putBoolean("passive", v).apply()
 
     /**
+     * Every how many days the profile of someone learned is written again by itself, from what
+     * their kept history has gained since (Learning.keepUpDue): one of [KEEP_UP_CHOICES], 0 for
+     * only when Learn is tapped.
+     */
+    var keepUpDays: Int
+        get() = sp.getInt("keepupdays", 3)
+        set(v) = sp.edit().putInt("keepupdays", v).apply()
+
+    /**
      * Learn about me across chats: keep a day log of what is said live, write each day up, and a
      * profile of me that reply drafts follow. The log stays on the phone.
      */
@@ -277,6 +286,9 @@ class Prefs(ctx: Context) {
 
         /** What to store for a chosen model: nothing for the default, so a newer default reaches it. */
         fun stored(chosen: String, default: String): String = chosen.trim().takeIf { it != default }.orEmpty()
+
+        /** What [keepUpDays] can be: off, daily, every three days, weekly. */
+        val KEEP_UP_CHOICES = listOf(0, 1, 3, 7)
 
         const val USE_JUDGE = "judge"
         const val USE_DEEP = "deep"

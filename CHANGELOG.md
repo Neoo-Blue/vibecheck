@@ -4,6 +4,22 @@ The newest APK is on the [releases page](https://github.com/Neoo-Blue/vibecheck/
 releases were taken down with 6.9.4. Each section below is also that version's notes: the Release
 workflow publishes the section whose heading matches the tag.
 
+## 6.10.0
+
+- **Profiles keep up with the chat by themselves, as often as you choose.**
+  - Until now, while chatting the app kept counting (who opens, how fast you reply, how each of you
+    writes) and topped up the kept history, but the profile, and with it what they are to you and
+    how close you are, was only written again when you tapped Learn.
+  - Setup → Behaviour now has how often to bring it up to date: off, daily, every 3 days (the
+    default) or weekly.
+  - Once that long has passed since the last write and the kept history has at least 30 new
+    messages, the next time you open their chat the profile is written again in the background.
+    Only the stretches whose text changed are noted again, the newest mostly, so it costs little.
+  - What they are to you and how close you are are read from it again; what you chose by hand
+    stays. Nothing pops up: the card shows how far it has got when opened, and 「档案已自动更新」
+    when it is done.
+  - Someone not learned yet has no kept history to write from: one Learn first.
+
 ## 6.9.6
 
 - **WeChat's status under a name is not the name.**

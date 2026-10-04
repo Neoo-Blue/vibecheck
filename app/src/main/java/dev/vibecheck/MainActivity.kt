@@ -333,6 +333,25 @@ class MainActivity : Activity() {
             addView(switch(L.t("读不到界面时用截图识字（微信、Telegram 必须开）", "Read the screen with OCR when an app hides its text (WeChat, Telegram)"), prefs.ocr) { prefs.ocr = it })
             addView(switch(L.t("从后续走向学习（校准风险、重排动作）", "Learn from what happens next (calibrate risk, re-rank moves)"), prefs.learning) { prefs.learning = it })
             addView(switch(L.t("在聊天里顺便记住每个人（只在手机上）", "Remember people while you chat (on this phone only)"), prefs.passive) { prefs.passive = it })
+            addView(text(L.t("自动更新学习过的人的档案和关系：多久一次", "Bring the profiles and relationships of people you learned up to date: how often"), 13f, sub()).apply { setPadding(0, dp(8), 0, 0) })
+            val every = RadioGroup(this@MainActivity).apply { orientation = RadioGroup.HORIZONTAL }
+            val days = Prefs.KEEP_UP_CHOICES
+            val labels = days.map { d ->
+                when (d) {
+                    0 -> L.t("关闭", "Off")
+                    1 -> L.t("每天", "Daily")
+                    7 -> L.t("每周", "Weekly")
+                    else -> L.t("每 $d 天", "$d days")
+                }
+            }
+            val ids = labels.map { View.generateViewId() }
+            labels.forEachIndexed { i, l -> every.addView(RadioButton(this@MainActivity).apply { id = ids[i]; text = l; setTextColor(fg()) }) }
+            every.check(ids[days.indexOf(prefs.keepUpDays).takeIf { it >= 0 } ?: days.indexOf(3)])
+            every.setOnCheckedChangeListener { _, id -> ids.indexOf(id).takeIf { it >= 0 }?.let { prefs.keepUpDays = days[it] } }
+            addView(every)
+            addView(hint(L.t(
+                "到了时间、又有至少 ${Learning.KEEP_UP_MIN} 条新消息时，下次打开和 Ta 的聊天就在后台更新，只整理新增的部分，花费很少。你手选的关系不会被改。没学习过的人要先点一次「学习」。",
+                "When it is time and there are at least ${Learning.KEEP_UP_MIN} new messages, it runs in the background next time you open their chat, noting only what is new, so it costs little. A relationship you chose stays. Someone not learned yet needs one Learn first.")))
         })
 
         addView(tile(null, L.t("通用背景", "General context"), L.t(
