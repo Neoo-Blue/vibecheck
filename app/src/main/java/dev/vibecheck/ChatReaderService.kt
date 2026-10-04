@@ -757,6 +757,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         // An unreadable name shares one record between people, so nothing is learned into it.
         if (prefs.passive && name != UNKNOWN) observePassively(record, bubbles, entering)
         resumeProfile(id)
+        if (name != UNKNOWN) keepUp(record)
         checkDay()
         Diag.person = "${displayName(record)} (${record.stats.theirMsgs + record.stats.myMsgs} seen, ${record.model.updates} updates)"
 
@@ -1775,9 +1776,10 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
      * [readNow] is how many messages the read that led here got, or null when a write is picked
      * up again. [byUser]: the user asked (a read, or Learn on a stuck write), so what it says may
      * pop the card open; a write picked up by itself only updates it. [fresh] notes every stretch
-     * again instead of keeping the notes on those whose text has not changed.
+     * again instead of keeping the notes on those whose text has not changed. [news]: a write
+     * that keeps the profile up to date by itself ([keepUp]), for that many new messages.
      */
-    private fun writeProfile(id: String, readNow: Int?, byUser: Boolean, fresh: Boolean = false) {
+    private fun writeProfile(id: String, readNow: Int?, byUser: Boolean, fresh: Boolean = false, news: Int? = null) {
         val rec = people.loadId(id)
         val name = displayName(rec)
         val title = L.t("学习此人", "Learn this person")
@@ -1791,10 +1793,15 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         val progress = Learning.Progress(System.currentTimeMillis(), readNow)
         Learning.writing[id] = progress
         writing += id
+        // What the profile is written from, counted as the next write by itself counts new messages.
+        val from = people.archiveCount(id)
         awake()
         learnResult(id, title, listOf(
-            if (readNow == null) L.t("接着写档案…", "Picking the profile up again…")
-            else L.t("读了 $readNow 条，开始写档案…", "Read $readNow messages, starting the profile…"),
+            when {
+                news != null -> L.t("有 $news 条新消息，自动更新档案…", "$news new messages: bringing the profile up to date…")
+                readNow == null -> L.t("接着写档案…", "Picking the profile up again…")
+                else -> L.t("读了 $readNow 条，开始写档案…", "Read $readNow messages, starting the profile…")
+            },
             L.t("在后台写，不用重来。", "It runs in the background; no need to start again.")), open = byUser)
         tickProgress()
         profileIo.execute {
@@ -1817,7 +1824,11 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                 awake()
                 val size = if (progress.kept > 0) L.t("共存 ${progress.kept} 条（${Learning.amount(progress.chars)}）",
                     "${progress.kept} messages kept (${Learning.amount(progress.chars)})") else null
-                r.onSuccess { (text, skipped) -> resumes.remove(id); profileDone(id, progress.kept, text, skipped, open = byUser) }
+                r.onSuccess { (text, skipped) ->
+                    resumes.remove(id)
+                    people.setWrittenFrom(id, from)
+                    profileDone(id, progress.kept, text, skipped, open = byUser, auto = news != null)
+                }
                     .onFailure {
                         Diag.log("learn: profile failed ${it.message}")
                         // A lost connection mends itself: picked up again once back in this chat,
@@ -1885,6 +1896,30 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
     /** Profile writes cut off by a lost connection, by person: how many times each was picked up again. */
     private val resumes = HashMap<String, Int>()
     private var resumeAt = 0L
+
+    /** When a profile was last written by itself, or tried, by person: see [keepUp]. */
+    private val keptUpAt = HashMap<String, Long>()
+
+    /**
+     * In the chat of someone learned: their profile written again by itself, and with it who they
+     * are to you and how close you are (unless chosen by hand), once Prefs.keepUpDays have passed
+     * and their kept history has grown enough since (Learning.keepUpDue). Only the stretches whose
+     * text changed are noted again, the newest mostly, so it costs little. Nothing pops up: the
+     * card shows how far it has got when opened.
+     */
+    private fun keepUp(record: PersonStore.Record) {
+        val id = record.id
+        val days = prefs.keepUpDays
+        if (days <= 0 || learning || id in writing || prefs.orKey.isBlank()) return
+        val kept = people.archiveCount(id)
+        if (kept == 0) return
+        val now = System.currentTimeMillis()
+        val from = people.writtenFrom(id) ?: record.learned
+        if (!Learning.keepUpDue(days, record.learnedAt, kept, from, keptUpAt[id] ?: 0L, now)) return
+        keptUpAt[id] = now
+        Diag.log("learn: bringing ${record.name}'s profile up to date (${kept - from} new)")
+        writeProfile(id, null, byUser = false, news = kept - from)
+    }
 
     /** In [id]'s chat again: a profile write that lost its connection carries on. */
     private fun resumeProfile(id: String) {
@@ -2001,7 +2036,7 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         return ask(Profile.profileSystem(true), Profile.profilePrompt(name, history, body, true), 5000, OpenRouter.Think.LOW) to notes.count { it == null }
     }
 
-    private fun profileDone(id: String, total: Int, text: String, skipped: Int, open: Boolean = true) {
+    private fun profileDone(id: String, total: Int, text: String, skipped: Int, open: Boolean = true, auto: Boolean = false) {
         // Saved onto a fresh copy: a scan during the calls may have moved the counts on.
         val rec = people.loadId(id)
         val p = Relationship.parse(text.trim())
@@ -2013,7 +2048,8 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         rec.learnedAt = System.currentTimeMillis()
         people.save(rec)
         Diag.log("learn: profile written for ${rec.name} (${p.rel}, ${p.close})")
-        learnResult(id, L.t("已学会 ${displayName(rec)}（$total 条）", "Learned ${displayName(rec)} ($total messages)"),
+        learnResult(id, if (auto) L.t("档案已自动更新（$total 条）", "Profile brought up to date ($total messages)")
+            else L.t("已学会 ${displayName(rec)}（$total 条）", "Learned ${displayName(rec)} ($total messages)"),
             listOfNotNull(
                 people.relationLine(rec),
                 overruled?.let { L.t("（档案看像「${L.label(it)}」，没改你设定的）", "(the profile reads as ${L.label(it)}; your choice was kept)") },

@@ -257,7 +257,7 @@ are fine where the app gives text. OCR (WeChat, Telegram) cannot see emoji at al
 | last 8 turns | one `intent / danger / action` line per judgment | the last 3 as `where the last few turns went` in the state |
 | this person's bandit | see Learning | calibrates danger, re-ranks the best move |
 | kept history | the whole chat, from "learn this person", topped up live with new messages | what the profile is written from; reply drafts pick real past exchanges from it |
-| profile | sections written by DeepSeek from the whole kept history | the full text for deep reads and drafts; a short brief as `relationship context`; one matching line on the card |
+| profile | sections written by DeepSeek from the whole kept history, then kept up to date as often as Setup says | the full text for deep reads and drafts; a short brief as `relationship context`; one matching line on the card |
 
 The same sentence means different things from different people, so nothing is shared between
 two people: "apologize first" working on A does not touch B's ranking. Their page on the People tab shows what
@@ -283,6 +283,14 @@ background app's network once the screen goes off.
 What was read is kept on the phone (app-private storage, one file per chat) and topped up with
 new messages as you chat. The next Learn only reads back until it meets what is kept, so it
 takes seconds. Their page on the People tab deletes a kept history; forgetting a person deletes it too.
+
+**The profile keeps up by itself.** Setup → Behaviour sets how often: off, daily, every 3 days (the
+default) or weekly. Once that long has passed since a person's profile was last written and their
+kept history has at least 30 new messages, the next time you open their chat the profile is written
+again in the background: only the stretches whose text changed are noted again (the newest,
+mostly), so it costs little. What they are to you and how close you are are read from it again,
+except what you chose by hand. Nothing pops up; open the card to see how far it has got. Someone
+not learned yet has no kept history: one Learn first.
 
 Then the profile. A long history is sent to your OpenRouter model in stretches of about 12,000
 characters, three at a time: notes on each stretch, then one profile from all the notes. Notes

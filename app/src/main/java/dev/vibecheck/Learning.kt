@@ -53,6 +53,25 @@ object Learning {
 
     fun stalled(p: Progress, now: Long): Boolean = now - p.lastAt > STALL_MS
 
+    /**
+     * Is it time to write a learned person's profile again by itself (Prefs.keepUpDays)? [days]
+     * since it was last written ([writtenAt]), at the least, and never by itself when 0; and only
+     * once their kept history ([kept] messages) holds [KEEP_UP_MIN] more than that write was made
+     * from ([writtenFrom]): no new messages, no call. A day is taken a little short, so a daily
+     * update keeps to the time of day you chat. [triedAt] is when one was last started by itself:
+     * a write that did not get through is not started again for [KEEP_UP_RETRY_MS].
+     */
+    fun keepUpDue(days: Int, writtenAt: Long, kept: Int, writtenFrom: Int, triedAt: Long, now: Long): Boolean =
+        days > 0 && kept - writtenFrom >= KEEP_UP_MIN &&
+            now - writtenAt >= days * DAY_MS - DAY_SLACK_MS && now - triedAt >= KEEP_UP_RETRY_MS
+
+    /** New messages it takes before a profile is written again by itself. */
+    const val KEEP_UP_MIN = 30
+
+    private const val DAY_MS = 86_400_000L
+    private const val DAY_SLACK_MS = 3 * 3_600_000L
+    private const val KEEP_UP_RETRY_MS = 6 * 3_600_000L
+
     /** "████░░░░░░" for [done] of [total]. */
     fun bar(done: Int, total: Int, cells: Int = 10): String {
         val full = if (total <= 0) 0 else (done.coerceIn(0, total) * cells / total)
