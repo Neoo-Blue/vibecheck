@@ -542,8 +542,9 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             // own card sitting there, was once cut out and kept as "their name". A capture of the
             // chat's own window has neither in it.
             val over = if (shot.windowOnly) emptyList() else overlays()
-            Ocr.read(shot.bmp) { items ->   // main thread
+            Ocr.read(shot.bmp) { got ->   // main thread
                 ocrDone()
+                val items = got.blocks
                 // Recognized in bitmap pixels; everything else works in screen coordinates.
                 val placed = items.map { (text, b) ->
                     text to Chat.Box(b.left + win.left, b.top + win.top, b.right + win.left, b.bottom + win.top)
@@ -554,10 +555,18 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
                 // throw away real messages that the card merely covers.
                 val ime = imeBox()
                 val exclude = if (shot.windowOnly) emptyList() else listOfNotNull(card.bounds(), ime)
-                val (found, titles) = Chat.fromOcr(
+                val found = Chat.fromOcr(
                     placed, win, exclude, Chat.replyRowAbove(ime, win),
                     resources.displayMetrics.density, pixelSide(shot.bmp, win, over + exclude),
-                )
+                ).first
+                // The title bar line by line (Ocr.Read), and without a line drawn paler than a name,
+                // which goes under one: WeChat's status (an icon, then 「Studying」), a presence line.
+                // Under a name of emoji, which OCR cannot read, it was taken for the name, and the
+                // chat for someone new. A typing indicator stays: it shows where the name was.
+                val inBar = got.lines.map { (text, b) ->
+                    text to Chat.Box(b.left + win.left, b.top + win.top, b.right + win.left, b.bottom + win.top)
+                }.filter { Chat.inTitleBar(it.second, win) }
+                val titles = inBar.filter { Person.isTyping(listOf(it)) || !pale(shot.bmp, it.second, win) }
                 val covered = Person.titleCovered(over + exclude, win)
                 val older = avatarPrint(shot.bmp, win, found, over + exclude)?.let { Person.hashOf(it) }.orEmpty()
                 val inside = avatarPrint(shot.bmp, win, found, over + exclude, inside = true)?.let { Person.insideHash(it) }.orEmpty()
@@ -2077,8 +2086,8 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
             if (shot == null) { main.post { cb(emptyList()) }; return@captureChat }
             val win = shot.box
             val over = if (shot.windowOnly) emptyList() else overlays()
-            Ocr.read(shot.bmp) { items ->
-                val placed = items.map { (text, b) -> text to Chat.Box(b.left + win.left, b.top + win.top, b.right + win.left, b.bottom + win.top) }
+            Ocr.read(shot.bmp) { got ->
+                val placed = got.blocks.map { (text, b) -> text to Chat.Box(b.left + win.left, b.top + win.top, b.right + win.left, b.bottom + win.top) }
                 val ime = imeBox()
                 val exclude = if (shot.windowOnly) emptyList() else listOfNotNull(card.bounds(), ime)
                 // The pixels are read while sides are decided, so the picture goes only after.
@@ -2334,6 +2343,18 @@ class ChatReaderService : AccessibilityService(), DebugServer.Host, OverlayCard.
         bmp.getPixels(px, 0, bmp.width, 0, 0, bmp.width, bmp.height)
         return Person.emojiPrint(px, bmp.width, bmp.height)
     }
+
+    /** Is the text in [box] (on screen) drawn paler than a name, on a capture of [win] (Person.paleText)? */
+    private fun pale(bmp: Bitmap, box: Chat.Box, win: Chat.Box): Boolean = runCatching {
+        val l = (box.left - win.left).coerceIn(0, bmp.width)
+        val t = (box.top - win.top).coerceIn(0, bmp.height)
+        val r = (box.right - win.left).coerceIn(0, bmp.width)
+        val b = (box.bottom - win.top).coerceIn(0, bmp.height)
+        if (r - l < 2 || b - t < 2) return@runCatching false
+        val px = IntArray((r - l) * (b - t))
+        bmp.getPixels(px, 0, r - l, l, t, r - l, b - t)
+        Person.paleText(px, r - l, b - t) == true
+    }.getOrDefault(false)
 
     /**
      * The name in the middle of the title bar, cut out as a small picture: for a name OCR cannot

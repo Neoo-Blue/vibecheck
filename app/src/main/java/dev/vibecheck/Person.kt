@@ -335,6 +335,39 @@ object Person {
         a.size == b.size && a.isNotEmpty() && a.indices.sumOf { kotlin.math.abs(a[it] - b[it]) } / a.size <= 14
 
     /**
+     * Is the text in this picture ([px], [w] x [h], a text OCR read in the title bar) drawn paler
+     * than a name, as apps draw what goes under one: WeChat's status (an icon, then 「Studying」),
+     * a presence line, Soul's 「关注后可邀请通话」. A name is in the bar's own text colour, black on
+     * a light bar and near white on a dark one. Measured by the strokes' cores, the 90th percentile
+     * of how far the drawn pixels are from the background (the three channels' differences added
+     * up): 680 to 740 for names in Chinese and Latin letters, 410 for WeChat's grey quotes, 140 for
+     * its status. Null when too little is drawn to tell.
+     */
+    fun paleText(px: IntArray, w: Int, h: Int): Boolean? {
+        if (w <= 0 || h <= 0 || px.size < w * h) return null
+        val counts = HashMap<Int, Int>()
+        for (i in 0 until w * h) counts.merge(px[i] and 0xF8F8F8, 1, Int::plus)
+        val common = counts.maxByOrNull { it.value }!!.key
+        val bg = px[(0 until w * h).first { (px[it] and 0xF8F8F8) == common }]
+        val drawn = ArrayList<Int>()
+        for (i in 0 until w * h) {
+            val p = px[i]
+            val d = kotlin.math.abs((p shr 16 and 0xFF) - (bg shr 16 and 0xFF)) +
+                kotlin.math.abs((p shr 8 and 0xFF) - (bg shr 8 and 0xFF)) + kotlin.math.abs((p and 0xFF) - (bg and 0xFF))
+            if (d > 40) drawn += d
+        }
+        if (drawn.size < MIN_DRAWN) return null
+        drawn.sort()
+        return drawn[drawn.size * 9 / 10] < PALE
+    }
+
+    /** Under this, at the strokes' cores, a text is drawn paler than a name (see [paleText]). */
+    private const val PALE = 480
+
+    /** Fewer drawn pixels than this say nothing about a text's colour. */
+    private const val MIN_DRAWN = 30
+
+    /**
      * A picture of a name by its shape alone, whatever the colours: dark letters on a light bar
      * and light ones on a dark bar give the same. Over the part drawn on the picture's commonest
      * colour (its background), [INK_COLS] x [INK_ROWS] shares of drawn pixels (0..255), then that
