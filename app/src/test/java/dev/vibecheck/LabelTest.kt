@@ -81,6 +81,18 @@ class LabelTest {
         return px
     }
 
+    @Test fun aLinePalerThanANameIsNotTheName() {
+        // A name: black on WeChat's light bar, near white on its dark one.
+        assertEquals(false, Person.paleText(glyph(0x191919, 0xEDEDED, m = true), 60, 40))
+        assertEquals(false, Person.paleText(glyph(0xD8D8D8, 0x111111, m = true), 60, 40))
+        // What goes under one: a status in light grey, a grey hint, the same in dark mode.
+        assertEquals(true, Person.paleText(glyph(0xBDBDBD, 0xEDEDED, m = true), 60, 40))
+        assertEquals(true, Person.paleText(glyph(0x999999, 0xFFFFFF, m = false), 60, 40))
+        assertEquals(true, Person.paleText(glyph(0x5A5A5A, 0x111111, m = true), 60, 40))
+        // Nothing drawn: nothing to go on.
+        assertNull(Person.paleText(IntArray(60 * 40) { 0xEDEDED }, 60, 40))
+    }
+
     @Test fun aNameIsKnownByItsShapeInDarkModeAndLight() {
         val light = Person.inkSignature(glyph(0x222222, 0xEDEDED, m = true), 60, 40)!!
         val dark = Person.inkSignature(glyph(0xE0E0E0, 0x191919, m = true), 60, 40)!!

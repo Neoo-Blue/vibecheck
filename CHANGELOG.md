@@ -4,6 +4,22 @@ The newest APK is on the [releases page](https://github.com/Neoo-Blue/vibecheck/
 releases were taken down with 6.9.4. Each section below is also that version's notes: the Release
 workflow publishes the section whose heading matches the tag.
 
+## 6.9.6
+
+- **WeChat's status under a name is not the name.**
+  - WeChat can show a status under a contact's name in the chat's title bar: a small icon, then a
+    word like "Studying", in pale grey.
+  - Where the name is emoji, which OCR cannot read, that line was the only text in the bar. It was
+    taken for the name, so the chat went to a new person called after the status (「陌生人或刚加上」),
+    and none of what was known about them was used.
+  - A line in the title bar drawn paler than a name (a status, a presence line) is no longer a
+    name, so the chat is known by the person's avatar again, as before the status was set.
+  - The title bar is read line by line: OCR can take a name and the status under it as one piece
+    of text, which made the name 「张三 ▲Studying」.
+  - A "typing…" indicator in the title bar is still recognised.
+  - Someone kept under a status by an earlier version can be removed under People → that name →
+    Forget this person (忘记这个人). What was known about the real person was not touched.
+
 ## 6.9.5
 
 - **Soul's quick replies are no longer read as messages, however the screen is read.**
